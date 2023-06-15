@@ -57,3 +57,6 @@ class RecData:
     
     def get_num_users(self):
         return self._num_users
+    
+    def get_num_items(self):
+        return self._num_items
