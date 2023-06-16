@@ -63,3 +63,6 @@ class RecData:
     
     def get_num_items(self):
         return self._num_items
+    
+    def set_titles(self, titles):
+        pass
