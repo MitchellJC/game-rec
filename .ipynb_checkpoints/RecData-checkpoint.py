@@ -18,8 +18,11 @@ class RecData:
         self._num_items = len(self._items)
         
         self._M = self._M.to_numpy()
+        
+        # Shift ratings up to assign 0 to missing values
         self._M += 1
         self._M = np.nan_to_num(self._M)
+        
         self._M = csr_array(self._M)
                 
     def leave_k_out_split(self, k=1):
