@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_array
 
 class RecData:
     def create_from_dataframe(self, data):
@@ -20,13 +20,13 @@ class RecData:
         self._M = self._M.to_numpy()
         self._M += 1
         self._M = np.nan_to_num(self._M)
-        self._M = csr_matrix(self._M)
+        self._M = csr_array(self._M)
                 
     def leave_k_out_split(self, k=1):
         M_prime = self._M.copy()
         test = []
         for user in range(self._M.shape[0]):
-            possible_indices = np.nonzero(self._M[user, :])[1]
+            possible_indices = np.nonzero(self._M[[user], :])[1]
             left_out = np.random.choice(possible_indices, k, replace=False)
             for item in left_out:
                 M_prime[user, item] = 0
