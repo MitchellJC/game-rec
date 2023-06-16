@@ -65,4 +65,35 @@ class RecData:
         return self._num_items
     
     def set_titles(self, titles):
-        pass
+        """Maps titles to item ids using given DataFrame. Columns must be of the form [item_id, title]"""
+        self._index_to_title = {self._itemid_to_index[item_id]: title for _, item_id, title in titles.itertuples() if item_id in self._itemid_to_index}
+        
+    def index_to_title(self, index):
+        return self._index_to_title[index]
+    
+    def top_n(self, user, n=10):
+        if self._M is None:
+            raise RuntimeError("Please ensure to call fit before generating top n")
+        users, items = self._M.nonzero()
+        num_samples = len(items)
+        
+        users_rated = []
+        for i in range(len(users)):
+            if users[i] == user:
+                users_rated.append(items[i])
+        
+        top = []
+        for i in range(num_samples):
+            item = items[i]
+            
+            # Do not add items for which rating already exists
+            if item not in users_rated:
+                continue
+                
+            predicted_rating = self._M[user, item]
+            
+            top.append((predicted_rating, item))
+            top.sort(key=lambda x: x[0], reverse=True)
+            top = top[:min(n, len(top))]
+        
+        return top
