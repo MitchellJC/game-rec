@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.sparse import csr_array
+from sklearn.preprocessing import MaxAbsScaler
 
 class RecData:
     def create_from_dataframe(self, data):
@@ -20,7 +21,8 @@ class RecData:
         self._M = self._M.to_numpy()
         
         # Shift ratings up to assign 0 to missing values
-        self._M += 1
+        self._scaler = MaxAbsScaler()
+        self._M = self._scaler.fit_transform(self._M + 1)
         self._M = np.nan_to_num(self._M)
         
         self._M = csr_array(self._M)
