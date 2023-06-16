@@ -99,3 +99,11 @@ class RecData:
             top = top[:min(n, len(top))]
         
         return top
+    
+    def transform(self, sample):
+        """"Sample should be a row vector of reviews, with NaNs for missing."""
+        sample = self._scaler.transform(sample + 1)
+        sample = np.nan_to_num(sample)
+        sample = csr_array(sample)
+        return sample
+        
