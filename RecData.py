@@ -13,8 +13,8 @@ class RecData:
         self._index_to_userid = {i: user_id for user_id, i in self._userid_to_index.items()}
         self._index_to_itemid = {i: app_id for app_id, i in self._itemid_to_index.items()}
         
-        self._users = self._userid_to_index.keys()
-        self._items = self._itemid_to_index.keys()
+        self._users = [user for user in self._userid_to_index.keys()]
+        self._items = [item for item in self._itemid_to_index.keys()]
         self._num_users = len(self._users)
         self._num_items = len(self._items)
         
@@ -117,6 +117,8 @@ class RecData:
         return results
     
     def create_prefs(self, prefs):
+        """Create a preference array from prefs tuples in the form (index, preference) 
+        where preference of 1 indicates recommend and preference of 0 indicated would not recommend."""
         prefs_vec = csr_array(np.zeros([1, self._num_items]))
         for i, pref in prefs:
             pref += 1
