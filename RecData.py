@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.sparse import csr_array
+from scipy.sparse import csr_array, lil_array
 from sklearn.preprocessing import MaxAbsScaler
 
 class RecData:
@@ -119,9 +119,10 @@ class RecData:
     def create_prefs(self, prefs):
         """Create a preference array from prefs tuples in the form (index, preference) 
         where preference of 1 indicates recommend and preference of 0 indicated would not recommend."""
-        prefs_vec = csr_array(np.zeros([1, self._num_items]))
+        prefs_vec = lil_array(np.zeros([1, self._num_items]))
         for i, pref in prefs:
             pref += 1
             prefs_vec[0, i] = pref
             
+        prefs_vec = csr_array(prefs_vec)
         return prefs_vec
