@@ -21,8 +21,7 @@ class RecData:
         self._M = self._M.to_numpy()
         
         # Shift ratings up to assign 0 to missing values
-        self._scaler = MaxAbsScaler()
-        self._M = self._scaler.fit_transform(self._M + 1)
+        self._M += 1
         self._M = np.nan_to_num(self._M)
         
         self._M = csr_array(self._M)
@@ -76,19 +75,18 @@ class RecData:
     def top_n(self, user, n=10):
         if self._M is None:
             raise RuntimeError("Please ensure to call fit before generating top n")
-        users, items = self._M.nonzero()
+            
+        users, items = self._M[[user], :].nonzero()
         num_samples = len(items)
         
         users_rated = []
         for i in range(len(users)):
-            if users[i] == user:
-                users_rated.append(items[i])
-        
+            users_rated.append(items[i])
+            
         top = []
         for i in range(num_samples):
             item = items[i]
             
-            # Do not add items for which rating already exists
             if item not in users_rated:
                 continue
                 
@@ -102,8 +100,26 @@ class RecData:
     
     def transform(self, sample):
         """"Sample should be a row vector of reviews, with NaNs for missing."""
-        sample = self._scaler.transform(sample + 1)
+        sample += 1
         sample = np.nan_to_num(sample)
         sample = csr_array(sample)
         return sample
         
+    def search_title(self, title):
+        """Finds all results for title and returns the matching title and index pairs."""
+        title = title.lower()
+        results = []
+        for key, value in self._index_to_title.items():
+            value = value.lower()
+            if title in value:
+                results.append((value, key))
+                
+        return results
+    
+    def create_prefs(self, prefs):
+        prefs_vec = csr_array(np.zeros([1, self._num_items]))
+        for i, pref in prefs:
+            pref += 1
+            prefs_vec[0, i] = pref
+            
+        return prefs_vec
