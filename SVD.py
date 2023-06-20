@@ -24,6 +24,7 @@ class SVDPredictor:
         
         self._user_features = np.random.normal(size=(self._num_users, self._k), scale=0.01)
         self._item_features = np.random.normal(size=(self._num_items, self._k), scale=0.01)
+        self._implicit_features = np.random.normal(size=(self._num_items, self._k), scale=0.01)
         self._user_biases = np.zeros([self._num_users, 1])
         self._item_biases = np.zeros([self._num_items, 1])
         
@@ -182,14 +183,13 @@ class SVDPredictor:
         
 
         # Compute user features update
-        new_user_features = (self._user_features[user, :] + self._learning_rate*diff*self._item_features[item, :] 
-            - self._learning_rate*self._C*self._item_features[item, :])
-        
+        new_user_features = (self._user_features[user, :] + self._learning_rate*(diff*self._item_features[item, :] 
+            - self._C*self._item_features[item, :]))
         
         if do_items:
             # Compute item features update
-            self._item_features[item, :] += (self._learning_rate*diff*self._user_features[user, :] 
-                - self._learning_rate*self._C*self._user_features[user, :])
+            self._item_features[item, :] += self._learning_rate*(diff*self._user_features[user, :] 
+                - self._C*self._user_features[user, :])
             
             # Compute item bias update
             self._item_biases[item, 0] += self._learning_rate*(diff - self._C*self._item_biases[item, 0])

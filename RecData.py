@@ -41,20 +41,6 @@ class RecData:
         train_data._M = M_prime
         
         return train_data, test
-                        
-    def create_anti_set(self):
-        """Return all user-item pairs not in the data"""
-        anti_set = []
-        print(self._M.shape)
-        for user in range(self._M.shape[0]):
-            if user % 1000 == 0:
-                print(user)
-                
-            for item in range(self._M.shape[1]):
-                if self._M[user, item] == 0:        
-                    anti_set.append((user, item))
-                    
-        return anti_set
             
     def get_matrix(self):
         return self._M
