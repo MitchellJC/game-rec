@@ -92,7 +92,7 @@ class SVDPredictor:
         self._num_users += 1
         
         self._user_features = np.concatenate([self._user_features, np.random.normal(size=(1, self._k), scale=0.01)], axis=0)
-        self._user_biases = np.concatenate([self._user_features, np.zeros([1, 1])], axis=0)
+        self._user_biases = np.concatenate([self._user_biases, np.zeros([1, 1])], axis=0)
                                                                                
         indices_of_new = [new_i for new_i in range(len(users), len(total_users))]
                                               
