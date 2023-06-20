@@ -84,7 +84,7 @@ class SVDPredictor:
                 if (len(self._val_errors) > 1 
                     and self._val_errors[-2] - self._val_errors[-1] < 1e-14
                     ):
-                    print("Very small change in validation error. Terminating training.")
+                    print("Small change in validation error. Terminating training.")
                     return
                     
             
@@ -151,7 +151,8 @@ class SVDPredictor:
             predicted_rating = (
                 self._mu + self._user_biases[user, 0] 
                 + self._item_biases[item, 0] 
-                + self._user_features[user, :] @ np.transpose(self._item_features)[:, item])
+                + self._user_features[user, :] 
+                @ np.transpose(self._item_features)[:, item])
             
             top.append((predicted_rating, item))
             top.sort(key=lambda x: x[0], reverse=True)
@@ -170,9 +171,11 @@ class SVDPredictor:
             List of (user, item, prediction) tuples."""
         predictions = []
         for user, item in pairs:
-            prediction = (self._mu + self._user_biases[user, 0] 
-                          + self._item_biases[item, 0] 
-                          + self._user_features[user, :] @ np.transpose(self._item_features)[:, item])
+            prediction = (
+                self._mu + self._user_biases[user, 0] 
+                + self._item_biases[item, 0] 
+                + self._user_features[user, :] 
+                @ np.transpose(self._item_features)[:, item])
             prediction = prediction
             predictions.append((user, item, prediction))
         
