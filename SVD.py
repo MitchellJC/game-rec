@@ -8,11 +8,13 @@ import numpy as np
 
 class Metrics:
     def rmse(self, predictions):
-        return math.sqrt(sum((prediction - true_rating)**2 for _, _, prediction, true_rating in predictions)/len(predictions))
+        return math.sqrt(sum((prediction - true_rating)**2 for _, _, prediction, 
+                             true_rating in predictions)/len(predictions))
 
 class SVDPredictor:
     """SVD for collaborative filtering"""
-    def __init__(self, num_users, num_items, k=100, learning_rate=0.01, epochs=5, C=0.02, partial_batch_size=int(1e5)):
+    def __init__(self, num_users, num_items, k=100, learning_rate=0.01, epochs=5,
+                  C=0.02, partial_batch_size=int(1e5)):
         self._num_users = num_users
         self._num_items = num_items
         
@@ -22,9 +24,12 @@ class SVDPredictor:
         self._C = C
         self._partial_batch_size = partial_batch_size
         
-        self._user_features = np.random.normal(size=(self._num_users, self._k), scale=0.01)
-        self._item_features = np.random.normal(size=(self._num_items, self._k), scale=0.01)
-        self._implicit_features = np.random.normal(size=(self._num_items, self._k), scale=0.01)
+        self._user_features = np.random.normal(size=(self._num_users, self._k), 
+                                               scale=0.01)
+        self._item_features = np.random.normal(size=(self._num_items, self._k), 
+                                               scale=0.01)
+        self._implicit_features = np.random.normal(size=(self._num_items, self._k), 
+                                                   scale=0.01)
         self._user_biases = np.zeros([self._num_users, 1])
         self._item_biases = np.zeros([self._num_items, 1])
         
@@ -80,7 +85,8 @@ class SVDPredictor:
                     
             
     def partial_fit(self, new_sample):
-        """"Faciliates online training. Add new user vector new_sample into the model and fit with warm start."""
+        """"Faciliates online training. Add new user vector new_sample into the 
+        model and fit with warm start."""
         
         users, items = self._M.nonzero()
         self._M = vstack([self._M, new_sample])
@@ -92,7 +98,8 @@ class SVDPredictor:
         new_sample_index = self._num_users
         self._num_users += 1
         
-        self._user_features = np.concatenate([self._user_features, np.random.normal(size=(1, self._k), scale=0.01)], axis=0)
+        self._user_features = np.concatenate(
+            [self._user_features, np.random.normal(size=(1, self._k), scale=0.01)], axis=0)
         self._user_biases = np.concatenate([self._user_biases, np.zeros([1, 1])], axis=0)
                                                                                
         indices_of_new = [new_i for new_i in range(len(users), len(total_users))]
@@ -147,7 +154,8 @@ class SVDPredictor:
         return top
         
     def predict(self, pairs):
-        """Returns a list of predictions of the form (user, item, prediction) for each (user, item) pair in pairs.
+        """Returns a list of predictions of the form (user, item, prediction) 
+        for each (user, item) pair in pairs.
         
         Parameters:
             pairs (list) - List of (user, item) tuples.
@@ -156,27 +164,31 @@ class SVDPredictor:
             List of (user, item, prediction) tuples."""
         predictions = []
         for user, item in pairs:
-            prediction = (self._mu + self._user_biases[user, 0] + self._item_biases[item, 0] +
-                                self._user_features[user, :] @ np.transpose(self._item_features)[:, item])
+            prediction = (self._mu + self._user_biases[user, 0] 
+                          + self._item_biases[item, 0] 
+                          + self._user_features[user, :] @ np.transpose(self._item_features)[:, item])
             prediction = prediction
             predictions.append((user, item, prediction))
         
         return predictions
     
     def get_train_errors(self):
-        """Return the training errors stored while training. Returns none if model has not been fit."""
+        """Return the training errors stored while training. Returns none if 
+        model has not been fit."""
         return self._train_errors
     
     def get_val_errors(self):
-        """Return the validation errors stored while training. Returns none if model has not been fit."""
+        """Return the validation errors stored while training. Returns none if 
+        model has not been fit."""
         return self._val_errors
     
     def _update_features(self, i, users, items, do_items=True):
         user = users[i]
         item = items[i]                  
 
-        diff = self._M[user, item] - (self._mu + self._user_biases[user, 0] + self._item_biases[item, 0] +
-                                self._user_features[user, :] @ np.transpose(self._item_features)[:, item])
+        diff = self._M[user, item] 
+        - (self._mu + self._user_biases[user, 0] + self._item_biases[item, 0] 
+           + self._user_features[user, :] @ np.transpose(self._item_features)[:, item])
         
         # Compute user bias update
         self._user_biases[user, 0] += self._learning_rate*(diff - self._C*self._user_biases[user, 0])
