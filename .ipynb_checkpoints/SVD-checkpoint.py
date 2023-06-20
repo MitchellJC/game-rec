@@ -24,6 +24,8 @@ class SVDPredictor:
         
         self._user_features = np.random.normal(size=(self._num_users, self._k), scale=0.01)
         self._item_features = np.random.normal(size=(self._num_items, self._k), scale=0.01)
+        self._user_biases = np.zeros([self._num_users, 1])
+        self._item_biases = np.zeros([self._num_items, 1])
         
         self._M = None
         self._num_samples = None
@@ -36,24 +38,32 @@ class SVDPredictor:
         self._train_errors = []
         if validation_set:
             self._val_errors = []
-        
+            
+        # Retrieve sample locations
         users, items = M.nonzero()
         self._num_samples = len(users)
         self._mask = (M != 0)
         
+        self._avg = self._M.sum() / self._num_samples
+        
         for epoch in range(self._epochs):
             start_time = time.time()
             
+            # For all samples in random order update each parameter
             for i in random.sample(range(self._num_samples), k=self._num_samples):
                 self._update_features(i, users, items)                
             
+            # Display training information
             print("Epoch", epoch, end="/")
-
             self._show_error()
             
             if validation_set:
+                # Predict rating for all pairs in validation
                 predictions = self.predict([(user, item) for user, item, _ in validation_set])
+                
+                # Add true ratings into tuples
                 predictions = [prediction + (validation_set[i][2],) for i, prediction in enumerate(predictions)]
+                
                 metrics = Metrics()
                 val_error = metrics.rmse(predictions)
                 self._val_errors.append(val_error)
@@ -61,6 +71,7 @@ class SVDPredictor:
                 
             print("Time:", round(time.time() - start_time, 2), "seconds")
             
+            # Convergence criterion
             if validation_set:
                 if len(self._val_errors) > 1 and self._val_errors[-2] - self._val_errors[-1] < 1e-14:
                     print("Very small change in validation error. Terminating training.")
