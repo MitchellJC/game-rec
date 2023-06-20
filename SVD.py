@@ -44,7 +44,7 @@ class SVDPredictor:
         self._num_samples = len(users)
         self._mask = (M != 0)
         
-        self._avg = self._M.sum() / self._num_samples
+        self._mu = self._M.sum() / self._num_samples
         
         for epoch in range(self._epochs):
             start_time = time.time()
@@ -92,6 +92,7 @@ class SVDPredictor:
         self._num_users += 1
         
         self._user_features = np.concatenate([self._user_features, np.random.normal(size=(1, self._k), scale=0.01)], axis=0)
+        self._user_biases = np.concatenate([self._user_features, np.zeros([1, 1])], axis=0)
                                                                                
         indices_of_new = [new_i for new_i in range(len(users), len(total_users))]
                                               
@@ -106,7 +107,6 @@ class SVDPredictor:
             # Perform update for each sample
             for i in random.sample(possible_indices , k=len(possible_indices)):
                 self._update_features(i, total_users, total_items, do_items=False)
-            
             
             print("Epoch", epoch, end="/")
             self._show_error()
@@ -136,7 +136,8 @@ class SVDPredictor:
             if item in users_rated:
                 continue
                 
-            predicted_rating = (self._user_features[user, :] @ np.transpose(self._item_features)[:, item])
+            predicted_rating = (self._mu + self._user_biases[user, 0] + self._item_biases[item, 0] +
+                                self._user_features[user, :] @ np.transpose(self._item_features)[:, item])
             
             top.append((predicted_rating, item))
             top.sort(key=lambda x: x[0], reverse=True)
@@ -154,7 +155,8 @@ class SVDPredictor:
             List of (user, item, prediction) tuples."""
         predictions = []
         for user, item in pairs:
-            prediction = self._user_features[user, :] @ np.transpose(self._item_features)[:, item]
+            prediction = (self._mu + self._user_biases[user, 0] + self._item_biases[item, 0] +
+                                self._user_features[user, :] @ np.transpose(self._item_features)[:, item])
             prediction = prediction
             predictions.append((user, item, prediction))
         
@@ -172,19 +174,32 @@ class SVDPredictor:
         user = users[i]
         item = items[i]                  
 
-        diff = self._learning_rate*(self._M[user, item] - self._user_features[user, :] @ np.transpose(self._item_features[item, :]))
+        diff = self._M[user, item] - (self._mu + self._user_biases[user, 0] + self._item_biases[item, 0] +
+                                self._user_features[user, :] @ np.transpose(self._item_features)[:, item])
+        
+        # Compute user bias update
+        self._user_biases[user, 0] += self._learning_rate*(diff - self._C*self._user_biases[user, 0])
+        
 
         # Compute user features update
-        new_user_features = self._user_features[user, :] + diff*self._item_features[item, :] - self._learning_rate*self._C*self._item_features[item, :]
+        new_user_features = (self._user_features[user, :] + self._learning_rate*diff*self._item_features[item, :] 
+            - self._learning_rate*self._C*self._item_features[item, :])
         
-        # Compute item features update
+        
         if do_items:
-            self._item_features[item, :] += diff*self._user_features[user, :] - self._learning_rate*self._C*self._user_features[user, :]
+            # Compute item features update
+            self._item_features[item, :] += (self._learning_rate*diff*self._user_features[user, :] 
+                - self._learning_rate*self._C*self._user_features[user, :])
+            
+            # Compute item bias update
+            self._item_biases[item, 0] += self._learning_rate*(diff - self._C*self._item_biases[item, 0])
 
         self._user_features[user, :] = new_user_features
         
     def _show_error(self):
-        big_diff = self._M - (self._user_features @ np.transpose(self._item_features))
+        big_diff = self._M - (self._mu + np.repeat(self._user_biases, self._M.shape[1], axis=1) 
+                              + np.repeat(np.transpose(self._item_biases), self._M.shape[0], axis=0) 
+                              + self._user_features @ np.transpose(self._item_features))
         
         # Mask to ignore error from missing reviews
         big_diff = self._mask.multiply(big_diff)
