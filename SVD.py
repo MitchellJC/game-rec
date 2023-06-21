@@ -42,6 +42,7 @@ class SVDPredictor:
         """Fit the model with the given user-item matrix M (csr array)."""
         self._M = M 
         self._train_errors = []
+        self._cache_users_rated(M)
         if validation_set:
             self._val_errors = []
             
@@ -133,19 +134,11 @@ class SVDPredictor:
             n (int) - The number of recommendations to give
             
         Preconditions:
-            n > 0"""
-        if self._M is None:
-            raise RuntimeError("Please ensure to call fit before generating top n")
-        users, items = self._M[[user], :].nonzero()
-        
-        users_rated = []
-        for i in range(len(users)):
-            users_rated.append(items[i])
-        
+            n > 0"""        
         top = []
         for item in range(self._num_items):
             # Do not add items for which rating already exists
-            if item in users_rated:
+            if item in self._users_rated[user]:
                 continue
                 
             predicted_rating = (
@@ -194,11 +187,12 @@ class SVDPredictor:
     def _update_features(self, i, users, items, do_items=True):
         user = users[i]
         item = items[i]                  
-
+        user_implicit = self._user_implicit_features(user)
         diff = (
             self._M[user, item] 
             - (self._mu + self._user_biases[user, 0] + self._item_biases[item, 0] 
-           + self._user_features[user, :] @ np.transpose(self._item_features)[:, item])
+           + (self._user_features[user, :] + user_implicit)
+           @ np.transpose(self._item_features)[:, item])
            )
         
         # Compute user bias update
@@ -214,7 +208,7 @@ class SVDPredictor:
             # Compute item features update
             new_item_features = self._item_features[item, :] + self._learning_rate*(
                 diff*(self._user_features[user, :] 
-                      + self._user_implicit_features(user))
+                      + user_implicit)
                 - self._C*self._user_features[user, :])
             
             # Compute item bias update
@@ -222,24 +216,29 @@ class SVDPredictor:
                 diff - self._C*self._item_biases[item, 0])
             
             # Compute implicit item feature update
-            self._implicit_features += self._learning_rate*(
+            self._implicit_features[item, :] += self._learning_rate*(
                 diff*self._item_features[item, :]
-                - self._C*self._user_implicit_features(user)
+                - self._C*user_implicit
             )
 
         self._user_features[user, :] = new_user_features
         self._item_features[item, :] = new_item_features
 
     def _user_implicit_features(self, user):
-        return np.sum([self._implicit_features[item_star, :] 
-                       for item_star in self._rated[user]], axis=0)
+        return (np.sum([self._implicit_features[item_star, :] 
+                       for item_star in self._users_rated[user]], axis=0) 
+                       / np.sqrt(len(self._users_rated[user]))
+                       )
         
     def _show_error(self):
         big_diff = (
             self._M - (self._mu 
                        + np.repeat(self._user_biases, self._M.shape[1], axis=1) 
                        + np.repeat(np.transpose(self._item_biases), self._M.shape[0], axis=0) 
-                       + self._user_features @ np.transpose(self._item_features)))
+                       + (self._user_features 
+                          + np.concatenate([self._user_implicit_features(user) 
+                                       for user in range(self._num_users)], axis=0)) 
+                       @ np.transpose(self._item_features)))
         
         # Mask to ignore error from missing reviews
         big_diff = self._mask.multiply(big_diff)
@@ -247,9 +246,9 @@ class SVDPredictor:
         self._train_errors.append(error)
         print("Training error:", error, end="/")
 
-    def _cache_users_rated(self):
+    def _cache_users_rated(self, M):
         self._users_rated = defaultdict(lambda: [])
-        users, items = self._M.nonzero()
+        users, items = M.nonzero()
         for sample_num in range(len(users)):
             user = users[sample_num]
             item = items[sample_num]
