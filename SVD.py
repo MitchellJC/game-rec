@@ -64,7 +64,7 @@ class SVDPredictor:
             
             # Display training information
             print("Epoch", epoch, end="/")
-            self._show_error()
+            self._compute_error()
             
             if validation_set:
                 # Predict rating for all pairs in validation
@@ -199,8 +199,8 @@ class SVDPredictor:
     
     def _update_features(self, i, users, items, do_items=True):
         user = users[i]
-        item = items[i]                  
-        user_implicit = self._user_implicit[user, :]
+        item = items[i]
+        self._user_implicit[user, :] = self._user_implicit_features(user)                  
         diff = self._M[user, item] - self.predict(user, item)
 
         # Compute user bias update
@@ -216,7 +216,7 @@ class SVDPredictor:
             # Compute item features update
             new_item_features = self._item_features[item, :] + self._learning_rate*(
                 diff*(self._user_features[user, :] 
-                      + user_implicit)
+                      + self._user_implicit[user, :])
                 - self._C*self._user_features[user, :])
             
             # Compute item bias update
@@ -226,11 +226,8 @@ class SVDPredictor:
             # Compute implicit item feature update
             self._item_implicit[item, :] += self._learning_rate*(
                 diff*self._item_features[item, :]
-                - self._C*user_implicit
-            )
-
-            # Compute implicit user feature update
-            self._user_implicit[user, :] = self._user_implicit_features(user)
+                - self._C*self._user_implicit[user, :]
+            )            
             
         self._user_features[user, :] = new_user_features
         self._item_features[item, :] = new_item_features
@@ -241,36 +238,23 @@ class SVDPredictor:
                        / np.sqrt(len(self._users_rated[user]))
                        )
         
-    def _show_error(self):
-        users, items = self._M.nonzero()
-        residuals = []
-        for sample_num in range(len(users)):
-            user = users[sample_num]
-            item = items[sample_num]
+    def _compute_error(self):
+        # Update all user implicits
+        for user in range(self._num_users):
+            self._user_implicit[user, :] = self._user_implicit_features(user)
 
-            estimate = (self._mu 
-                        + self._user_biases[user, 0] 
-                        + self._item_biases[item, 0]
-                        + (self._user_features[user, :] + self._user_implicit_features(user))
-                        @ np.transpose(self._item_features[item, :]))
-            
-            residual = (self._M[user, item] - estimate)**2
-            residuals.append(residual)
-
-        error = np.sqrt(sum(residuals)/len(users))
-        # big_diff = (
-        #     self._M - (self._mu 
-        #                + np.repeat(self._user_biases, self._M.shape[1], axis=1) 
-        #                + np.repeat(np.transpose(self._item_biases), self._M.shape[0], axis=0) 
-        #                + (self._user_features 
-        #                   + np.concatenate([self._user_implicit_features(user) 
-        #                                     for user in range(self._num_users)], 
-        #                                     axis=0)) 
-        #                @ np.transpose(self._item_features)))
+        estimate_M = (
+            self._mask.multiply(self._mu)
+            + self._mask.multiply(np.repeat(self._user_biases, self._M.shape[1], 
+                                            axis=1))
+            + self._mask.multiply(np.repeat(np.transpose(self._item_biases), 
+                                            self._M.shape[0], axis=0))
+            + self._mask.multiply((self._user_features + self._user_implicit) 
+                                  @ np.transpose(self._item_features))
+        )
+        big_diff = self._M - estimate_M
         
-        # # Mask to ignore error from missing reviews
-        # big_diff = self._mask.multiply(big_diff)
-        # error = sparse_norm(big_diff) / np.sqrt(self._num_samples)
+        error = sparse_norm(big_diff) / np.sqrt(self._num_samples)
         self._train_errors.append(error)
         print("Training error:", error, end="/")
 
