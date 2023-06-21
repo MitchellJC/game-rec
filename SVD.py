@@ -13,10 +13,11 @@ class Metrics:
 
 class SVDPredictor:
     """SVD for collaborative filtering"""
-    def __init__(self, num_users, num_items, k=10, learning_rate=0.01, epochs=5,
+    def __init__(self, num_users, num_items, num_ratings, k=10, learning_rate=0.01, epochs=5,
                   C=0.02, partial_batch_size=int(1e5)):
         self._num_users = num_users
         self._num_items = num_items
+        self._num_ratings = num_ratings
         
         self._k = k
         self._learning_rate = learning_rate
@@ -44,14 +45,14 @@ class SVDPredictor:
         """Fit the model with the given user-item matrix M (csr array)."""
         self._M = M 
         self._train_errors = []
-        self._cache_users_rated(M)
+        self._cache_users_rated(self._M)
         if validation_set:
             self._val_errors = []
             
         # Retrieve sample locations
-        users, items = M.nonzero()
+        users, items = self._M.nonzero()
         self._num_samples = len(users)
-        self._mask = (M != 0)
+        self._mask = (self._M != 0)
         
         self._mu = self._M.sum() / self._num_samples
         
@@ -85,13 +86,13 @@ class SVDPredictor:
                 
             print("Time:", round(time.time() - start_time, 2), "seconds")
             
-            # Convergence criterion
-            if validation_set:
-                if (len(self._val_errors) > 1 
-                    and self._val_errors[-2] - self._val_errors[-1] < 1e-14
-                    ):
-                    print("Small change in validation error. Terminating training.")
-                    return
+            # # Convergence criterion
+            # if validation_set:
+            #     if (len(self._val_errors) > 1 
+            #         and self._val_errors[-2] - self._val_errors[-1] < 1e-14
+            #         ):
+            #         print("Small change in validation error. Terminating training.")
+            #         return
                     
             
     def partial_fit(self, new_sample):
@@ -271,3 +272,70 @@ class SVDPredictor:
     # TODO
     def _loading_bar(self, percent):
         pass          
+
+class LogisticSVD(SVDPredictor):
+    def __init__(self, num_users, num_items, num_ratings, k=10, learning_rate=0.01, epochs=5,
+                  C=0.02, partial_batch_size=int(1e5)):
+        self._num_users = num_users
+        self._num_items = num_items
+        self._num_ratings = num_ratings
+        
+        self._k = k
+        self._learning_rate = learning_rate
+        self._epochs = epochs
+        self._C = C
+        self._partial_batch_size = partial_batch_size
+        
+        self._user_features = np.random.normal(size=(self._num_users, self._k), 
+                                               scale=0.01)
+        self._item_features = np.random.normal(size=(self._num_items, self._k), 
+                                               scale=0.01)
+        self._user_biases = np.zeros([self._num_users, 1])
+        self._item_biases = np.zeros([self._num_items, 1])
+        
+        self._M = None
+        self._num_samples = None
+        self._train_errors = None
+        self._val_errors = None
+
+    def predict(self, user, item):
+        """Predict users rating of item. User and item are indices corresponding
+        to user-item matrix."""
+        return (self._mu 
+                + self._user_biases[user, 0] 
+                + self._item_biases[item, 0] 
+                + self._user_features[user, :]   
+                @ np.transpose(self._item_features[item, :])
+                ) - 1
+
+    def _update_features(self, i, users, items, do_items=True):
+        user = users[i]
+        item = items[i]
+        true = self._M[user, item] - 1
+        pred =self.predict(user, item)
+
+        # Compute user bias update
+        self._user_biases[user, 0] += self._learning_rate*(
+            true*(1/pred) - (1 - true)*(1/(1 - pred)) - self._C*self._user_biases[user, 0])
+        
+        # Compute user features update
+        new_user_features = (self._user_features[user, :] + self._learning_rate*(
+            true*(self._item_features[item, :]/pred) - (1 - true)*(self._item_features[item, :]/(1 - pred))
+            - self._C*self._item_features[item, :]))
+        
+        if do_items:
+            # Compute item features update
+            new_item_features = self._item_features[item, :] + self._learning_rate*(
+                true*(self._user_features[item, :]/pred) - (1 - true)*(self._user_features[item, :]/(1 - pred))
+                - self._C*self._user_features[user, :])
+            
+            # Compute item bias update
+            self._item_biases[item, 0] += self._learning_rate*(
+                true*(1/pred) - (1 - true)*(1/(1 - pred)) - self._C*self._user_biases[user, 0])
+            
+            
+            
+        self._user_features[user, :] = new_user_features
+        self._item_features[item, :] = new_item_features
+
+    

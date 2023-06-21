@@ -1,6 +1,5 @@
 import numpy as np
 from scipy.sparse import csr_array, lil_array
-from sklearn.preprocessing import MaxAbsScaler
 
 class RecData:
     def create_from_dataframe(self, data):
