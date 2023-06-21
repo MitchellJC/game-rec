@@ -335,7 +335,7 @@ class LogisticSVD(SVDPredictor):
         if do_items:
             # Compute item features update
             new_item_features = (
-                self._item_features[user, :] 
+                self._item_features[item, :] 
                 + bias_update*self._user_features[user, :]
                 - self._learning_rate*self._C*self._item_features[item, :])
             
@@ -361,5 +361,5 @@ class LogisticSVD(SVDPredictor):
 
         loss *= -(1/self._num_samples)
         self._train_errors.append(loss)
-        print("Training error:", error, end="/")
+        print("Training error:", loss, end="/")
     
