@@ -44,6 +44,7 @@ class SVDPredictor:
     def fit(self, M, validation_set=None):
         """Fit the model with the given user-item matrix M (csr array)."""
         self._M = M 
+        self._validation_set = validation_set
         self._train_errors = []
         self._cache_users_rated(self._M)
         if validation_set:
@@ -71,18 +72,7 @@ class SVDPredictor:
             self._compute_error()
             
             if validation_set:
-                # Predict rating for all pairs in validation
-                predictions = self.predict_pairs([(user, item) 
-                                            for user, item, _ in validation_set])
-                
-                # Add true ratings into tuples
-                predictions = [prediction + (validation_set[i][2],) 
-                               for i, prediction in enumerate(predictions)]
-                
-                metrics = Metrics()
-                val_error = metrics.rmse(predictions)
-                self._val_errors.append(val_error)
-                print("Validation error:", val_error, end="/")
+                self._compute_val_error()
                 
             print("Time:", round(time.time() - start_time, 2), "seconds")
             
@@ -257,6 +247,20 @@ class SVDPredictor:
         self._train_errors.append(error)
         print("Training error:", error, end="/")
 
+    def _compute_val_error(self):
+        # Predict rating for all pairs in validation
+        predictions = self.predict_pairs([(user, item) 
+                                    for user, item, _ in self._validation_set])
+        
+        # Add true ratings into tuples
+        predictions = [prediction + (self._validation_set[i][2],) 
+                        for i, prediction in enumerate(predictions)]
+        
+        metrics = Metrics()
+        val_error = metrics.rmse(predictions)
+        self._val_errors.append(val_error)
+        print("Validation error:", val_error, end="/")
+
     def _cache_users_rated(self, M):
         self._users_rated = defaultdict(self._default_list)
         users, items = M.nonzero()
@@ -320,7 +324,7 @@ class LogisticSVD(SVDPredictor):
                      @ np.transpose(self._item_features[item, :])))
 
         bias_update = self._learning_rate*(
-            - true*a*pred + (1 - true)*a*pred**2*(1/(1 - pred)))
+            + true*a*pred - (1 - true)*a*pred**2*(1/(1 - pred)))
         
         # Compute user bias update
         self._user_biases[user, 0] += (
@@ -354,7 +358,7 @@ class LogisticSVD(SVDPredictor):
         for user in self._users_rated:
             items = self._users_rated[user]
             for item in items:
-                true = self._M[user, item]
+                true = self._M[user, item] - 1
                 pred = self.predict(user, item)
 
                 loss += true*np.log(pred) + (1 - true)*np.log(1 - pred)
@@ -363,3 +367,20 @@ class LogisticSVD(SVDPredictor):
         self._train_errors.append(loss)
         print("Training error:", loss, end="/")
     
+    def _compute_val_error(self):
+        # Predict rating for all pairs in validation
+        predictions = self.predict_pairs([(user, item) 
+                                    for user, item, _ in self._validation_set])
+        
+        # Add true ratings into tuples
+        predictions = [prediction + (self._validation_set[i][2],) 
+                        for i, prediction in enumerate(predictions)]
+        
+        val_error = 0
+        for user, item, pred, true in predictions:
+            true -= 1
+            val_error += true*np.log(pred) + (1 - true)*np.log(1 - pred)
+
+        val_error *= -(1/len(predictions))
+        self._val_errors.append(val_error)
+        print("Validation error:", val_error, end="/")
