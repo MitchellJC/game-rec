@@ -28,7 +28,9 @@ class SVDPredictor:
                                                scale=0.01)
         self._item_features = np.random.normal(size=(self._num_items, self._k), 
                                                scale=0.01)
-        self._implicit_features = np.random.normal(size=(self._num_items, self._k), 
+        self._item_implicit = np.random.normal(size=(self._num_items, self._k), 
+                                                   scale=0.01)
+        self._user_implicit = np.random.normal(size=(self._num_users, self._k), 
                                                    scale=0.01)
         self._user_biases = np.zeros([self._num_users, 1])
         self._item_biases = np.zeros([self._num_items, 1])
@@ -66,7 +68,7 @@ class SVDPredictor:
             
             if validation_set:
                 # Predict rating for all pairs in validation
-                predictions = self.predict([(user, item) 
+                predictions = self.predict_pairs([(user, item) 
                                             for user, item, _ in validation_set])
                 
                 # Add true ratings into tuples
@@ -152,8 +154,17 @@ class SVDPredictor:
             top = top[:min(n, len(top))]
         
         return top
+    
+    def predict(self, user, item):
+        return (self._mu 
+                + self._user_biases[user, 0] 
+                + self._item_biases[item, 0] 
+                + (self._user_features[user, :] 
+                   + self._user_implicit_features(user))
+                @ np.transpose(self._item_features[item, :])
+                )
         
-    def predict(self, pairs):
+    def predict_pairs(self, pairs):
         """Returns a list of predictions of the form (user, item, prediction) 
         for each (user, item) pair in pairs.
         
@@ -165,10 +176,12 @@ class SVDPredictor:
         predictions = []
         for user, item in pairs:
             prediction = (
-                self._mu + self._user_biases[user, 0] 
+                self._mu 
+                + self._user_biases[user, 0] 
                 + self._item_biases[item, 0] 
-                + self._user_features[user, :] 
-                @ np.transpose(self._item_features)[:, item])
+                + (self._user_features[user, :] 
+                   + self._user_implicit[user, :])
+                @ np.transpose(self._item_features[item, :]))
             prediction = prediction
             predictions.append((user, item, prediction))
         
@@ -187,14 +200,9 @@ class SVDPredictor:
     def _update_features(self, i, users, items, do_items=True):
         user = users[i]
         item = items[i]                  
-        user_implicit = self._user_implicit_features(user)
-        diff = (
-            self._M[user, item] 
-            - (self._mu + self._user_biases[user, 0] + self._item_biases[item, 0] 
-           + (self._user_features[user, :] + user_implicit)
-           @ np.transpose(self._item_features)[:, item])
-           )
-        
+        user_implicit = self._user_implicit[user, :]
+        diff = self._M[user, item] - self.predict(user, item)
+
         # Compute user bias update
         self._user_biases[user, 0] += self._learning_rate*(
             diff - self._C*self._user_biases[user, 0])
@@ -216,40 +224,65 @@ class SVDPredictor:
                 diff - self._C*self._item_biases[item, 0])
             
             # Compute implicit item feature update
-            self._implicit_features[item, :] += self._learning_rate*(
+            self._item_implicit[item, :] += self._learning_rate*(
                 diff*self._item_features[item, :]
                 - self._C*user_implicit
             )
 
+            # Compute implicit user feature update
+            self._user_implicit[user, :] = self._user_implicit_features(user)
+            
         self._user_features[user, :] = new_user_features
         self._item_features[item, :] = new_item_features
 
     def _user_implicit_features(self, user):
-        return (np.sum([self._implicit_features[item_star, :] 
+        return (np.sum([self._item_implicit[item_star, :] 
                        for item_star in self._users_rated[user]], axis=0) 
                        / np.sqrt(len(self._users_rated[user]))
                        )
         
     def _show_error(self):
-        big_diff = (
-            self._M - (self._mu 
-                       + np.repeat(self._user_biases, self._M.shape[1], axis=1) 
-                       + np.repeat(np.transpose(self._item_biases), self._M.shape[0], axis=0) 
-                       + (self._user_features 
-                          + np.concatenate([self._user_implicit_features(user) 
-                                       for user in range(self._num_users)], axis=0)) 
-                       @ np.transpose(self._item_features)))
+        users, items = self._M.nonzero()
+        residuals = []
+        for sample_num in range(len(users)):
+            user = users[sample_num]
+            item = items[sample_num]
+
+            estimate = (self._mu 
+                        + self._user_biases[user, 0] 
+                        + self._item_biases[item, 0]
+                        + (self._user_features[user, :] + self._user_implicit_features(user))
+                        @ np.transpose(self._item_features[item, :]))
+            
+            residual = (self._M[user, item] - estimate)**2
+            residuals.append(residual)
+
+        error = np.sqrt(sum(residuals)/len(users))
+        # big_diff = (
+        #     self._M - (self._mu 
+        #                + np.repeat(self._user_biases, self._M.shape[1], axis=1) 
+        #                + np.repeat(np.transpose(self._item_biases), self._M.shape[0], axis=0) 
+        #                + (self._user_features 
+        #                   + np.concatenate([self._user_implicit_features(user) 
+        #                                     for user in range(self._num_users)], 
+        #                                     axis=0)) 
+        #                @ np.transpose(self._item_features)))
         
-        # Mask to ignore error from missing reviews
-        big_diff = self._mask.multiply(big_diff)
-        error = sparse_norm(big_diff) / np.sqrt(self._num_samples)
+        # # Mask to ignore error from missing reviews
+        # big_diff = self._mask.multiply(big_diff)
+        # error = sparse_norm(big_diff) / np.sqrt(self._num_samples)
         self._train_errors.append(error)
         print("Training error:", error, end="/")
 
     def _cache_users_rated(self, M):
-        self._users_rated = defaultdict(lambda: [])
+        # Cannot use lambda due to pickling
+        def default_list():
+            return []
+        
+        self._users_rated = defaultdict(default_list)
         users, items = M.nonzero()
         for sample_num in range(len(users)):
             user = users[sample_num]
             item = items[sample_num]
             self._users_rated[user].append(item)
+
