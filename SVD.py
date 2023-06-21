@@ -350,22 +350,16 @@ class LogisticSVD(SVDPredictor):
         return 1/(1 + np.exp(-x))
     
     def _compute_error(self):
-        # Update all user implicits
-        for user in range(self._num_users):
-            self._user_implicit[user, :] = self._user_implicit_features(user)
+        loss = 0
+        for user in self._users_rated:
+            items = self._users_rated[user]
+            for item in items:
+                true = self._M[user, item]
+                pred = self.predict(user, item)
 
-        estimate_M = (
-            self._mask.multiply(self._mu)
-            + self._mask.multiply(np.repeat(self._user_biases, self._M.shape[1], 
-                                            axis=1))
-            + self._mask.multiply(np.repeat(np.transpose(self._item_biases), 
-                                            self._M.shape[0], axis=0))
-            + self._mask.multiply((self._user_features + self._user_implicit) 
-                                  @ np.transpose(self._item_features))
-        )
-        big_diff = self._M - estimate_M
-        
-        error = sparse_norm(big_diff) / np.sqrt(self._num_samples)
-        self._train_errors.append(error)
+                loss += true*np.log(pred) + (1 - true)*np.log(1 - pred)
+
+        loss *= -(1/self._num_samples)
+        self._train_errors.append(loss)
         print("Training error:", error, end="/")
     
