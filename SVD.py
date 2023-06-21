@@ -60,7 +60,10 @@ class SVDPredictor:
             
             # For all samples in random order update each parameter
             for i in random.sample(range(self._num_samples), k=self._num_samples):
-                self._update_features(i, users, items)                
+                self._update_features(i, users, items)     
+
+                percent = (i /self._num_samples)*100    
+                self._loading_bar(percent)  
             
             # Display training information
             print("Epoch", epoch, end="/")
@@ -143,11 +146,7 @@ class SVDPredictor:
             if item in self._users_rated[user]:
                 continue
                 
-            predicted_rating = (
-                self._mu + self._user_biases[user, 0] 
-                + self._item_biases[item, 0] 
-                + self._user_features[user, :] 
-                @ np.transpose(self._item_features)[:, item])
+            predicted_rating = self.predict(user, item)
             
             top.append((predicted_rating, item))
             top.sort(key=lambda x: x[0], reverse=True)
@@ -175,14 +174,7 @@ class SVDPredictor:
             List of (user, item, prediction) tuples."""
         predictions = []
         for user, item in pairs:
-            prediction = (
-                self._mu 
-                + self._user_biases[user, 0] 
-                + self._item_biases[item, 0] 
-                + (self._user_features[user, :] 
-                   + self._user_implicit[user, :])
-                @ np.transpose(self._item_features[item, :]))
-            prediction = prediction
+            prediction = self.predict(user, item)
             predictions.append((user, item, prediction))
         
         return predictions
@@ -233,11 +225,16 @@ class SVDPredictor:
         self._item_features[item, :] = new_item_features
 
     def _user_implicit_features(self, user):
-        return (np.sum([self._item_implicit[item_star, :] 
-                       for item_star in self._users_rated[user]], axis=0) 
-                       / np.sqrt(len(self._users_rated[user]))
-                       )
-        
+        user_implicit = (np.sum(
+            np.concatenate(
+                [self._item_implicit[item_star, :] for item_star in self._users_rated[user]], 
+                axis=0), axis=0) 
+        )
+
+        user_implicit /= np.sqrt(len(self._users_rated[user]))
+
+        return user_implicit
+              
     def _compute_error(self):
         # Update all user implicits
         for user in range(self._num_users):
@@ -259,14 +256,17 @@ class SVDPredictor:
         print("Training error:", error, end="/")
 
     def _cache_users_rated(self, M):
-        # Cannot use lambda due to pickling
-        def default_list():
-            return []
-        
-        self._users_rated = defaultdict(default_list)
+        self._users_rated = defaultdict(self._default_list)
         users, items = M.nonzero()
         for sample_num in range(len(users)):
             user = users[sample_num]
             item = items[sample_num]
             self._users_rated[user].append(item)
 
+    # Cannot use lambda due to pickling
+    def _default_list(self):
+        return []
+
+    # TODO
+    def _loading_bar(self, percent):
+        pass          
