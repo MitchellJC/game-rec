@@ -301,41 +301,71 @@ class LogisticSVD(SVDPredictor):
     def predict(self, user, item):
         """Predict users rating of item. User and item are indices corresponding
         to user-item matrix."""
-        return (self._mu 
+        return self._sigmoid(self._mu 
                 + self._user_biases[user, 0] 
                 + self._item_biases[item, 0] 
                 + self._user_features[user, :]   
                 @ np.transpose(self._item_features[item, :])
-                ) - 1
+                )
 
     def _update_features(self, i, users, items, do_items=True):
         user = users[i]
         item = items[i]
         true = self._M[user, item] - 1
-        pred =self.predict(user, item)
+        pred = self.predict(user, item)
+        a = np.exp(-(self._mu 
+                     + self._user_biases[user, 0] 
+                     + self._item_biases[item, 0] 
+                     + self._user_features[user, :]   
+                     @ np.transpose(self._item_features[item, :])))
 
+        bias_update = self._learning_rate*(
+            - true*a*pred + (1 - true)*a*pred**2*(1/(1 - pred)))
+        
         # Compute user bias update
-        self._user_biases[user, 0] += self._learning_rate*(
-            true*(1/pred) - (1 - true)*(1/(1 - pred)) - self._C*self._user_biases[user, 0])
+        self._user_biases[user, 0] += (
+            bias_update - self._learning_rate*self._C*self._user_biases[user, 0])
         
         # Compute user features update
-        new_user_features = (self._user_features[user, :] + self._learning_rate*(
-            true*(self._item_features[item, :]/pred) - (1 - true)*(self._item_features[item, :]/(1 - pred))
-            - self._C*self._item_features[item, :]))
+        new_user_features = (
+            self._user_features[user, :] 
+            + bias_update*self._item_features[item, :]
+            - self._learning_rate*self._C*self._user_features[user, :])
         
         if do_items:
             # Compute item features update
-            new_item_features = self._item_features[item, :] + self._learning_rate*(
-                true*(self._user_features[item, :]/pred) - (1 - true)*(self._user_features[item, :]/(1 - pred))
-                - self._C*self._user_features[user, :])
+            new_item_features = (
+                self._item_features[user, :] 
+                + bias_update*self._user_features[user, :]
+                - self._learning_rate*self._C*self._item_features[item, :])
             
             # Compute item bias update
-            self._item_biases[item, 0] += self._learning_rate*(
-                true*(1/pred) - (1 - true)*(1/(1 - pred)) - self._C*self._user_biases[user, 0])
-            
-            
+            self._item_biases[item, 0] += (
+                bias_update - self._learning_rate*self._C*self._item_biases[item, 0])
             
         self._user_features[user, :] = new_user_features
         self._item_features[item, :] = new_item_features
 
+    def _sigmoid(self, x):
+        return 1/(1 + np.exp(-x))
+    
+    def _compute_error(self):
+        # Update all user implicits
+        for user in range(self._num_users):
+            self._user_implicit[user, :] = self._user_implicit_features(user)
+
+        estimate_M = (
+            self._mask.multiply(self._mu)
+            + self._mask.multiply(np.repeat(self._user_biases, self._M.shape[1], 
+                                            axis=1))
+            + self._mask.multiply(np.repeat(np.transpose(self._item_biases), 
+                                            self._M.shape[0], axis=0))
+            + self._mask.multiply((self._user_features + self._user_implicit) 
+                                  @ np.transpose(self._item_features))
+        )
+        big_diff = self._M - estimate_M
+        
+        error = sparse_norm(big_diff) / np.sqrt(self._num_samples)
+        self._train_errors.append(error)
+        print("Training error:", error, end="/")
     
