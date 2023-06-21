@@ -13,7 +13,7 @@ class Metrics:
 
 class SVDPredictor:
     """SVD for collaborative filtering"""
-    def __init__(self, num_users, num_items, k=100, learning_rate=0.01, epochs=5,
+    def __init__(self, num_users, num_items, k=10, learning_rate=0.01, epochs=5,
                   C=0.02, partial_batch_size=int(1e5)):
         self._num_users = num_users
         self._num_items = num_items
@@ -105,7 +105,6 @@ class SVDPredictor:
         self._mask = (self._M != 0)
         
         num_samples = len(users)
-        new_sample_index = self._num_users
         self._num_users += 1
         
         self._user_features = np.concatenate(
@@ -155,6 +154,8 @@ class SVDPredictor:
         return top
     
     def predict(self, user, item):
+        """Predict users rating of item. User and item are indices corresponding
+        to user-item matrix."""
         return (self._mu 
                 + self._user_biases[user, 0] 
                 + self._item_biases[item, 0] 
@@ -217,7 +218,7 @@ class SVDPredictor:
             
             # Compute implicit item feature update
             self._item_implicit[item, :] += self._learning_rate*(
-                diff*self._item_features[item, :]
+                diff*self._item_features[item, :]/np.sqrt(len(self._users_rated[user]))
                 - self._C*self._user_implicit[user, :]
             )            
             
