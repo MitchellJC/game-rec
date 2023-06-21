@@ -39,7 +39,7 @@ class SVDPredictor:
         self._val_errors = None
     
     def fit(self, M, validation_set=None):
-        """Fit the model with the given user-item matrix (csr array)."""
+        """Fit the model with the given user-item matrix M (csr array)."""
         self._M = M 
         self._train_errors = []
         if validation_set:
@@ -205,7 +205,6 @@ class SVDPredictor:
         self._user_biases[user, 0] += self._learning_rate*(
             diff - self._C*self._user_biases[user, 0])
         
-
         # Compute user features update
         new_user_features = (self._user_features[user, :] + self._learning_rate*(
             diff*self._item_features[item, :] 
@@ -213,19 +212,32 @@ class SVDPredictor:
         
         if do_items:
             # Compute item features update
-            self._item_features[item, :] += self._learning_rate*(
-                diff*self._user_features[user, :] 
+            new_item_features = self._item_features[item, :] + self._learning_rate*(
+                diff*(self._user_features[user, :] 
+                      + self._user_implicit_features(user))
                 - self._C*self._user_features[user, :])
             
             # Compute item bias update
             self._item_biases[item, 0] += self._learning_rate*(
                 diff - self._C*self._item_biases[item, 0])
+            
+            # Compute implicit item feature update
+            self._implicit_features += self._learning_rate*(
+                diff*self._item_features[item, :]
+                - self._C*self._user_implicit_features(user)
+            )
 
         self._user_features[user, :] = new_user_features
+        self._item_features[item, :] = new_item_features
+
+    def _user_implicit_features(self, user):
+        return np.sum([self._implicit_features[item_star, :] 
+                       for item_star in self._rated[user]], axis=0)
         
     def _show_error(self):
         big_diff = (
-            self._M - (self._mu + np.repeat(self._user_biases, self._M.shape[1], axis=1) 
+            self._M - (self._mu 
+                       + np.repeat(self._user_biases, self._M.shape[1], axis=1) 
                        + np.repeat(np.transpose(self._item_biases), self._M.shape[0], axis=0) 
                        + self._user_features @ np.transpose(self._item_features)))
         
@@ -234,3 +246,11 @@ class SVDPredictor:
         error = sparse_norm(big_diff) / np.sqrt(self._num_samples)
         self._train_errors.append(error)
         print("Training error:", error, end="/")
+
+    def _cache_users_rated(self):
+        self._users_rated = defaultdict(lambda: [])
+        users, items = self._M.nonzero()
+        for sample_num in range(len(users)):
+            user = users[sample_num]
+            item = items[sample_num]
+            self._users_rated[user].append(item)
