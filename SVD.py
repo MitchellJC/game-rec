@@ -117,7 +117,7 @@ class SVDPredictor:
                 self._update_features(i, total_users, total_items, do_items=False)
             
             print("Epoch", epoch, end="/")
-            self._show_error()
+            self._compute_error()
             print("Time:", round(time.time() - start_time, 2), "seconds")
             
         
@@ -327,8 +327,8 @@ class LogisticSVD(SVDPredictor):
             + true*a*pred - (1 - true)*a*pred**2*(1/(1 - pred)))
         
         # Compute user bias update
-        self._user_biases[user, 0] += (
-            bias_update - self._learning_rate*self._C*self._user_biases[user, 0])
+        # self._user_biases[user, 0] += (
+        #     bias_update - self._learning_rate*self._C*self._user_biases[user, 0])
         
         # Compute user features update
         new_user_features = (
@@ -344,11 +344,12 @@ class LogisticSVD(SVDPredictor):
                 - self._learning_rate*self._C*self._item_features[item, :])
             
             # Compute item bias update
-            self._item_biases[item, 0] += (
-                bias_update - self._learning_rate*self._C*self._item_biases[item, 0])
+            # self._item_biases[item, 0] += (
+            #     bias_update - self._learning_rate*self._C*self._item_biases[item, 0])
             
         self._user_features[user, :] = new_user_features
-        self._item_features[item, :] = new_item_features
+        if do_items:
+            self._item_features[item, :] = new_item_features
 
     def _sigmoid(self, x):
         return 1/(1 + np.exp(-x))
