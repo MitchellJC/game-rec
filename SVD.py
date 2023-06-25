@@ -100,7 +100,6 @@ class SVDPredictor:
         
         self._user_features = np.concatenate(
             [self._user_features, np.random.normal(size=(1, self._k), scale=0.01)], axis=0)
-        self._user_biases = np.concatenate([self._user_biases, np.zeros([1, 1])], axis=0)
                                                                                
         indices_of_new = [new_i for new_i in range(len(users), len(total_users))]
                                               
@@ -288,14 +287,13 @@ class LogisticSVD(SVDPredictor):
         self._learning_rate = learning_rate
         self._epochs = epochs
         self._C = C
+        self._lrate_C = self._learning_rate*self._C
         self._partial_batch_size = partial_batch_size
         
         self._user_features = np.random.normal(size=(self._num_users, self._k), 
                                                scale=0.01)
         self._item_features = np.random.normal(size=(self._num_items, self._k), 
                                                scale=0.01)
-        self._user_biases = np.zeros([self._num_users, 1])
-        self._item_biases = np.zeros([self._num_items, 1])
         
         self._M = None
         self._num_samples = None
@@ -305,47 +303,37 @@ class LogisticSVD(SVDPredictor):
     def predict(self, user, item):
         """Predict users rating of item. User and item are indices corresponding
         to user-item matrix."""
-        return self._sigmoid(self._mu 
-                + self._user_biases[user, 0] 
-                + self._item_biases[item, 0] 
-                + self._user_features[user, :]   
+        return self._sigmoid(
+                self._user_features[user, :]   
                 @ np.transpose(self._item_features[item, :])
                 )
 
     def _update_features(self, i, users, items, do_items=True):
         user = users[i]
         item = items[i]
+
+        # Pre-cache computations
         true = self._M[user, item] - 1
         pred = self.predict(user, item)
-        a = np.exp(-(self._mu 
-                     + self._user_biases[user, 0] 
-                     + self._item_biases[item, 0] 
-                     + self._user_features[user, :]   
-                     @ np.transpose(self._item_features[item, :])))
-
-        bias_update = self._learning_rate*(
-            + true*a*pred - (1 - true)*a*pred**2*(1/(1 - pred)))
-        
-        # Compute user bias update
-        # self._user_biases[user, 0] += (
-        #     bias_update - self._learning_rate*self._C*self._user_biases[user, 0])
+        a = np.exp(-self._user_features[user, :] 
+                   @ np.transpose(self._item_features[item, :]))
+        ab = a*pred
+        coeff = self._learning_rate*( 
+            ( -(1 - true)*ab*pred )/(1 - pred) + true*ab 
+            )
         
         # Compute user features update
         new_user_features = (
-            self._user_features[user, :] 
-            + bias_update*self._item_features[item, :]
-            - self._learning_rate*self._C*self._user_features[user, :])
+            self._user_features[user, :] + self._item_features[item, :]*coeff
+            -self._lrate_C*self._user_features[user, :]
+        )
         
         if do_items:
             # Compute item features update
             new_item_features = (
-                self._item_features[item, :] 
-                + bias_update*self._user_features[user, :]
-                - self._learning_rate*self._C*self._item_features[item, :])
-            
-            # Compute item bias update
-            # self._item_biases[item, 0] += (
-            #     bias_update - self._learning_rate*self._C*self._item_biases[item, 0])
+                self._item_features[item, :] + self._user_features[user, :]*coeff
+                -self._lrate_C*self._item_features[item, :]
+            )
             
         self._user_features[user, :] = new_user_features
         if do_items:
