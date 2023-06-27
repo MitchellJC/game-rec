@@ -1,5 +1,5 @@
 from scipy.sparse.linalg import norm as sparse_norm
-from scipy.sparse import vstack, lil_array
+from scipy.sparse import vstack, lil_array, csr_array
 from collections import defaultdict
 import time
 import random
@@ -41,7 +41,7 @@ class SVDPredictor:
         self._train_errors = None
         self._val_errors = None
     
-    def fit(self, M, validation_set=None):
+    def fit(self, M, validation_set=None, tol=1e-15, early_stop=True):
         """Fit the model with the given user-item matrix M (csr array)."""
         self._M = M 
         self._validation_set = validation_set
@@ -54,9 +54,7 @@ class SVDPredictor:
         users, items = self._M.nonzero()
         self._num_samples = len(users)
         self._mask = (self._M != 0)
-        
-        self._mu = self._M.sum() / self._num_samples
-        
+                
         for epoch in range(self._epochs):
             start_time = time.time()
             
@@ -76,21 +74,53 @@ class SVDPredictor:
                 
             print("Time:", round(time.time() - start_time, 2), "seconds")
             
-            # # Convergence criterion
-            # if validation_set:
-            #     if (len(self._val_errors) > 1 
-            #         and self._val_errors[-2] - self._val_errors[-1] < 1e-14
-            #         ):
-            #         print("Small change in validation error. Terminating training.")
-            #         return
+            # Convergence criterion
+            if validation_set and early_stop:
+                if (len(self._val_errors) > 1 
+                    and self._val_errors[-2] - self._val_errors[-1] < tol
+                    ):
+                    print("Small change in validation error. Terminating training.")
+                    return
+                
+    def continue_fit(self, epochs, early_stop=True):
+        # Retrieve sample locations
+        users, items = self._M.nonzero()
+        self._num_samples = len(users)
+        self._mask = (self._M != 0)
+                
+        for epoch in range(epochs):
+            start_time = time.time()
+            
+            # For all samples in random order update each parameter
+            for i in random.sample(range(self._num_samples), k=self._num_samples):
+                self._update_features(i, users, items)     
+
+                percent = (i /self._num_samples)*100    
+                self._loading_bar(percent)  
+            
+            # Display training information
+            print("Epoch", epoch, end="/")
+            self._compute_error()
+            
+            if self._validation_set:
+                self._compute_val_error()
+                
+            print("Time:", round(time.time() - start_time, 2), "seconds")
+            
+            # Convergence criterion
+            if self._validation_set and early_stop:
+                if (len(self._val_errors) > 1 
+                    and self._val_errors[-2] - self._val_errors[-1] < 1e-15
+                    ):
+                    print("Small change in validation error. Terminating training.")
+                    return
                     
             
-    def partial_fit(self, new_sample):
+    def partial_fit(self, new_sample, compute_err=False):
         """"Faciliates online training. Add new user vector new_sample into the 
         model and fit with warm start."""
-        
         users, items = self._M.nonzero()
-        self._M = vstack([self._M, new_sample])
+        self._M = csr_array(vstack([self._M, new_sample]))
         total_users, total_items = self._M.nonzero()
         
         self._mask = (self._M != 0)
@@ -116,7 +146,8 @@ class SVDPredictor:
                 self._update_features(i, total_users, total_items, do_items=False)
             
             print("Epoch", epoch, end="/")
-            self._compute_error()
+            if compute_err:
+                self._compute_error()
             print("Time:", round(time.time() - start_time, 2), "seconds")
             
         
@@ -367,7 +398,6 @@ class LogisticSVD(SVDPredictor):
         
         val_error = 0
         for user, item, pred, true in predictions:
-            true -= 1
             val_error += true*np.log(pred) + (1 - true)*np.log(1 - pred)
 
         val_error *= -(1/len(predictions))
