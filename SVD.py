@@ -5,7 +5,11 @@ import time
 import random
 import math
 import numpy as np
+
+import numba as nb
 from numba import jit, njit
+from numba.typed import List, Dict
+from numba.types import ListType, uint32
 
 class Metrics:
     def rmse(self, predictions):
@@ -13,8 +17,19 @@ class Metrics:
                              true_rating in predictions)/len(predictions))
 
 class SVDBase():
+    """Base class for funk svd"""
     def __init__(self, num_users, num_items, num_ratings, k=10, learning_rate=0.01,
-                  C=0.02, partial_batch_size=int(1e5)):
+                  C=0.02):
+        """Initialise new SVDBase.
+        
+        Parameters:
+            num_user (int) - Number of users
+            num_items (int) - Number of items
+            num_ratings (int) - The number of different possible ratings
+            k (int) - The number of latent factors
+            learning_rate (float) - The learning rate
+            C (float) - Regularization parameter
+            partial"""
         self._num_users = num_users
         self._num_items = num_items
         self._num_ratings = num_ratings
@@ -22,7 +37,6 @@ class SVDBase():
         self._k = k
         self._learning_rate = learning_rate
         self._C = C
-        self._partial_batch_size = partial_batch_size
         self._lrate_C = self._learning_rate*self._C
         
         self._user_features = np.random.normal(size=(self._num_users, self._k), 
@@ -36,7 +50,15 @@ class SVDBase():
         self._val_errors = None
 
     def fit(self, M, epochs, validation_set=None, tol=1e-15, early_stop=True):
-        """Fit the model with the given user-item matrix M (csr array)."""
+        """Fit the model with the given utility matrix M (csr array).
+        
+        Parameters:
+            M (scipy csr_array) - UxI array where U is the number of users
+                and I is the number of items
+            epochs (int) - The number of epochs
+            validation_set (list) - List of validation pairs
+            tol (float) - Early stopping tolerance
+            early_stop (bool) - True to enable automatic early stopping"""
         self._M = M 
         
         self._validation_set = validation_set
@@ -44,37 +66,44 @@ class SVDBase():
         self._train_errors = []
         if validation_set:
             self._val_errors = []
-        self._cache_users_rated(self._M)
-            
+        
         # Retrieve sample locations
         self._users, self._items = self._M.nonzero()
         self._num_samples = len(self._users)
         self._mask = (self._M != 0)
 
+        self._cache_users_rated()
+
         self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
 
-    def continue_fit(self, epochs, early_stop=True):                
+    def continue_fit(self, epochs, early_stop=True):
+        """Continue training for extra epochs"""           
         self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
 
-    def partial_fit(self, new_sample, compute_err=False):
+    def partial_fit(self, new_sample, epochs, batch_size=0, compute_err=False):
         """"Faciliates online training. Add new user vector new_sample into the 
-        model and fit with warm start."""
+        model and fit with warm start.
+        
+        Parameters:
+            new_sample (csr_array) - 1xI arrary where I is the number of items
+            epochs (int) - The number of epochs
+            batch_size (int) - The number of users to mix-in for training
+            compute_err (bool) - True to enable training error computation"""
+        self._num_users += 1
         self._M = csr_array(vstack([self._M, new_sample]))
         total_users, total_items = self._M.nonzero()
         
         self._mask = (self._M != 0)
-        
-        self._num_users += 1
         
         self._user_features = np.concatenate(
             [self._user_features, np.random.normal(size=(1, self._k), scale=0.01)], axis=0)
                                                                                
         indices_of_new = [new_i for new_i in range(len(self._users), len(total_users))]
                                               
-        for epoch in range(self._epochs):
+        for epoch in range(epochs):
             start_time = time.time()
             # Choose a smaller subset of total samples already fitted
-            fitted_subset = random.sample(range(self._num_samples), k=self._partial_batch_size)    
+            fitted_subset = random.sample(range(self._num_samples), k=batch_size)    
             
             # Ensure that new indices are always used
             possible_indices = fitted_subset + indices_of_new
@@ -89,6 +118,8 @@ class SVDBase():
             print("Time:", round(time.time() - start_time, 2), "seconds")
 
     def pop_user(self):
+        """Remove the last added user from the model."""
+        self._num_users -= 1
         self._M = self._M[:-1, :]        
         self._user_features = self._user_features[:-1, :]
 
@@ -142,10 +173,12 @@ class SVDBase():
         return self._val_errors
 
     def _cache_users_rated(self):
-        self._users_rated = defaultdict(self._default_list)
+        self._users_rated = {}
         for sample_num in range(self._num_samples):
             user = self._users[sample_num]
             item = self._items[sample_num]
+            if user not in self._users_rated:
+                self._users_rated[user] = []
             self._users_rated[user].append(item)
 
     def _run_epochs(self, users, items, epochs, early_stop=False):
@@ -174,17 +207,13 @@ class SVDBase():
                     print("Small change in validation error. Terminating training.")
                     return
             
-    # Cannot use lambda due to pickling
-    def _default_list(self):
-        return []  
             
 class SVDPredictor(SVDBase):
-    """SVD for collaborative filtering"""
+    """SVD for collaborative filtering, uses explicit ratings."""
     def __init__(self, num_users, num_items, num_ratings, k=10, learning_rate=0.01,
-                  C=0.02, partial_batch_size=int(1e5)):
+                  C=0.02):
         super().__init__(num_users, num_items, num_ratings, k=k, 
-                          learning_rate=learning_rate, C=C, 
-                          partial_batch_size=partial_batch_size)
+                          learning_rate=learning_rate, C=C)
         
         self._user_biases = np.zeros([self._num_users, 1])
         self._item_biases = np.zeros([self._num_items, 1])
@@ -285,6 +314,7 @@ class SVDPredictor(SVDBase):
         print("Validation error:", val_error, end="/")
 
 class LogisticSVD(SVDBase):
+    """FunkSVD using binary classification for like and dislike."""
     def predict(self, user, item):
         """Predict users rating of item. User and item are indices corresponding
         to user-item matrix."""
@@ -357,3 +387,181 @@ class LogisticSVD(SVDBase):
         val_error *= -(1/len(predictions))
         self._val_errors.append(val_error)
         print("Validation error:", val_error, end="/")
+
+class FastLogisticSVD(LogisticSVD):
+    def fit(self, M, epochs, validation_set=None, tol=1e-15, early_stop=True):
+        self._M = M 
+        
+        self._validation_set = validation_set
+        self._tol = tol
+        self._train_errors = np.zeros([epochs])
+        if validation_set:
+            self._val_errors = np.zeros([epochs])
+        
+        # Retrieve sample locations
+        self._users, self._items = self._M.nonzero()
+        self._num_samples = len(self._users)
+        self._mask = (self._M != 0)
+
+        self._cache_users_rated()
+
+        self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
+
+    def predict(self, user, item):
+        return predict_fast(user, item, self._user_features, 
+                                  self._item_features)
+    
+    def _cache_users_rated(self):
+        self._users_rated = {}
+        for sample_num in range(self._num_samples):
+            user = self._users[sample_num]
+            item = self._items[sample_num]
+            if user not in self._users_rated:
+                self._users_rated[user] = []
+            self._users_rated[user].append(item)
+    
+    def _run_epochs(self, users, items, epochs, early_stop=False):
+        for epoch in range(epochs):
+            self._epoch = epoch
+            start_time = time.time()
+            
+            # For all samples in random order update each parameter
+            for i in random.sample(range(self._num_samples), k=self._num_samples):
+                self._user_features, self._item_features = (
+                    update_fast(i, users[i], items[i], self._M.data, 
+                                self._user_features,
+                                self._item_features,
+                                self._learning_rate,
+                                self._lrate_C))  
+            
+            # Display training information
+            print("Epoch", epoch)
+            self._compute_error()
+            
+            if self._validation_set:
+                self._compute_val_error()
+                
+            print("Time:", round(time.time() - start_time, 2), "seconds")
+            
+            # Convergence criterion
+            if (self._validation_set 
+                and early_stop 
+                and epoch > 1 
+                and self._val_errors[-2] - self._val_errors[-1] < self._tol
+            ):
+                    print("Small change in validation error. Terminating training.")
+                    return
+
+    def _compute_error(self):
+        self._M = self._M.tocsr()
+        compute_error_fast(self._M.data, self._M.indices, self._M.indptr, 
+                           self._num_samples, self._train_errors, self._epoch,
+                           self._user_features, self._item_features)
+        
+    def _compute_val_error(self):
+        compute_val_error_fast(self._val_errors, self._validation_set, self._epoch,
+                               self._user_features, self._item_features)
+        
+@jit(nopython=True)
+def update_fast(i, user, item, values, 
+                user_features, item_features, learning_rate, lrate_C,
+                do_items=True):
+    # Pre-cache computations
+    true = values[i]
+    pred = predict_fast(user, item, user_features, item_features)
+    a = np.exp(user_features[user, :] 
+                @ np.transpose(item_features[item, :]))
+    ab = a*pred
+    coeff = learning_rate*( 
+        ( -(1 - true)*ab*pred )/(1 - pred) + true*ab 
+        )
+    
+    # Compute user features update
+    new_user_features = (
+        user_features[user, :] + item_features[item, :]*coeff
+        -lrate_C*user_features[user, :]
+    )
+    
+    if do_items:
+        # Compute item features update
+        new_item_features = (
+            item_features[item, :] + user_features[user, :]*coeff
+            -lrate_C*item_features[item, :]
+        )
+    else:
+        new_item_features = None
+        
+    return new_user_features, new_item_features
+
+@jit(nopython=True)
+def compute_error_fast(values, indices, indptr, num_samples, train_errors, 
+                       epoch, user_features, item_features):
+    loss = 0
+
+    num_vals = 0
+    next_row_index = 0
+    for i in range(len(values)):
+        value = values[i]
+        column = indices[i]
+
+        num_vals += 1
+        if indptr[next_row_index] < num_vals:
+            next_row_index += 1
+
+        true = value - 1
+        pred = predict_fast(next_row_index - 1, column, user_features, item_features)
+
+        loss += true*np.log(pred) + (1 - true)*np.log(1 - pred)
+
+    loss *= -(1/num_samples)
+    train_errors[epoch] = loss
+    print("Training error:", loss)
+
+@jit(nopython=True)
+def compute_val_error_fast(val_errors, validation_set,
+                       epoch, user_features, item_features):
+   # Predict rating for all pairs in validation
+    predictions = predict_pairs_fast([(user, item) 
+                                for user, item, _ in validation_set], 
+                                user_features, item_features)
+    
+    # Add true ratings into tuples
+    predictions = [prediction + (validation_set[i][2],) 
+                    for i, prediction in enumerate(predictions)]
+    
+    val_error = 0
+    for user, item, pred, true in predictions:
+        val_error += true*np.log(pred) + (1 - true)*np.log(1 - pred)
+
+    val_error *= -(1/len(predictions))
+    val_errors[epoch] = val_error
+    print("Validation error:", val_error)
+
+@jit(nopython=True)
+def predict_fast(user, item, user_features, item_features):
+    return sigmoid_fast(
+            user_features[user, :]   
+            @ np.transpose(item_features[item, :])
+            )
+
+@jit(nopython=True)
+def predict_pairs_fast(pairs, user_features, item_features):
+        """Returns a list of predictions of the form (user, item, prediction) 
+        for each (user, item) pair in pairs.
+        
+        Parameters:
+            pairs (list) - List of (user, item) tuples.
+            
+        Returns:
+            List of (user, item, prediction) tuples."""
+        predictions = []
+        for user, item in pairs:
+            prediction = predict_fast(user, item, user_features, item_features)
+            predictions.append((user, item, prediction))
+        
+        return predictions
+
+@jit(nopython=True)
+def sigmoid_fast(x):
+    return 1/(1 + np.exp(-x))
+
