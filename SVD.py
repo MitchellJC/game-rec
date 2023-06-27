@@ -5,46 +5,42 @@ import time
 import random
 import math
 import numpy as np
+from numba import jit, njit
 
 class Metrics:
     def rmse(self, predictions):
         return math.sqrt(sum((prediction - true_rating)**2 for _, _, prediction, 
                              true_rating in predictions)/len(predictions))
 
-class SVDPredictor:
-    """SVD for collaborative filtering"""
-    def __init__(self, num_users, num_items, num_ratings, k=10, learning_rate=0.01, epochs=5,
+class SVDBase():
+    def __init__(self, num_users, num_items, num_ratings, k=10, learning_rate=0.01,
                   C=0.02, partial_batch_size=int(1e5)):
+        
         self._num_users = num_users
         self._num_items = num_items
         self._num_ratings = num_ratings
         
         self._k = k
         self._learning_rate = learning_rate
-        self._epochs = epochs
         self._C = C
         self._partial_batch_size = partial_batch_size
+        self._lrate_C = self._learning_rate*self._C
         
         self._user_features = np.random.normal(size=(self._num_users, self._k), 
                                                scale=0.01)
         self._item_features = np.random.normal(size=(self._num_items, self._k), 
                                                scale=0.01)
-        self._item_implicit = np.random.normal(size=(self._num_items, self._k), 
-                                                   scale=0.01)
-        self._user_implicit = np.random.normal(size=(self._num_users, self._k), 
-                                                   scale=0.01)
-        self._user_biases = np.zeros([self._num_users, 1])
-        self._item_biases = np.zeros([self._num_items, 1])
         
         self._M = None
         self._num_samples = None
         self._train_errors = None
         self._val_errors = None
-    
-    def fit(self, M, validation_set=None, tol=1e-15, early_stop=True):
+
+    def fit(self, M, epochs, validation_set=None, tol=1e-15, early_stop=True):
         """Fit the model with the given user-item matrix M (csr array)."""
         self._M = M 
         self._validation_set = validation_set
+        self._tol = tol
         self._train_errors = []
         self._cache_users_rated(self._M)
         if validation_set:
@@ -54,68 +50,9 @@ class SVDPredictor:
         users, items = self._M.nonzero()
         self._num_samples = len(users)
         self._mask = (self._M != 0)
-                
-        for epoch in range(self._epochs):
-            start_time = time.time()
-            
-            # For all samples in random order update each parameter
-            for i in random.sample(range(self._num_samples), k=self._num_samples):
-                self._update_features(i, users, items)     
 
-                percent = (i /self._num_samples)*100    
-                self._loading_bar(percent)  
-            
-            # Display training information
-            print("Epoch", epoch, end="/")
-            self._compute_error()
-            
-            if validation_set:
-                self._compute_val_error()
-                
-            print("Time:", round(time.time() - start_time, 2), "seconds")
-            
-            # Convergence criterion
-            if validation_set and early_stop:
-                if (len(self._val_errors) > 1 
-                    and self._val_errors[-2] - self._val_errors[-1] < tol
-                    ):
-                    print("Small change in validation error. Terminating training.")
-                    return
-                
-    def continue_fit(self, epochs, early_stop=True):
-        # Retrieve sample locations
-        users, items = self._M.nonzero()
-        self._num_samples = len(users)
-        self._mask = (self._M != 0)
-                
-        for epoch in range(epochs):
-            start_time = time.time()
-            
-            # For all samples in random order update each parameter
-            for i in random.sample(range(self._num_samples), k=self._num_samples):
-                self._update_features(i, users, items)     
-
-                percent = (i /self._num_samples)*100    
-                self._loading_bar(percent)  
-            
-            # Display training information
-            print("Epoch", epoch, end="/")
-            self._compute_error()
-            
-            if self._validation_set:
-                self._compute_val_error()
-                
-            print("Time:", round(time.time() - start_time, 2), "seconds")
-            
-            # Convergence criterion
-            if self._validation_set and early_stop:
-                if (len(self._val_errors) > 1 
-                    and self._val_errors[-2] - self._val_errors[-1] < 1e-15
-                    ):
-                    print("Small change in validation error. Terminating training.")
-                    return
-                    
-            
+        self._run_epochs(users, items, epochs, early_stop=early_stop)
+        
     def partial_fit(self, new_sample, compute_err=False):
         """"Faciliates online training. Add new user vector new_sample into the 
         model and fit with warm start."""
@@ -149,7 +86,62 @@ class SVDPredictor:
             if compute_err:
                 self._compute_error()
             print("Time:", round(time.time() - start_time, 2), "seconds")
+
+    def _run_epochs(self, users, items, epochs, early_stop=False):
+        for epoch in range(epochs):
+            start_time = time.time()
             
+            # For all samples in random order update each parameter
+            for i in random.sample(range(self._num_samples), k=self._num_samples):
+                self._update_features(i, users, items)     
+            
+            # Display training information
+            print("Epoch", epoch, end="/")
+            self._compute_error()
+            
+            if self._validation_set:
+                self._compute_val_error()
+                
+            print("Time:", round(time.time() - start_time, 2), "seconds")
+            
+            # Convergence criterion
+            if (self._validation_set 
+                and early_stop 
+                and len(self._val_errors) > 1 
+                and self._val_errors[-2] - self._val_errors[-1] < self._tol
+            ):
+                    print("Small change in validation error. Terminating training.")
+                    return
+            
+    
+
+class SVDPredictor(SVDBase):
+    """SVD for collaborative filtering"""
+    def __init__(self, num_users, num_items, num_ratings, k=10, learning_rate=0.01,
+                  C=0.02, partial_batch_size=int(1e5)):
+        super().__init__(num_users, num_items, num_ratings, k=k, 
+                          learning_rate=learning_rate, C=C, 
+                          partial_batch_size=partial_batch_size)
+        
+        
+        self._item_implicit = np.random.normal(size=(self._num_items, self._k), 
+                                                   scale=0.01)
+        self._user_implicit = np.random.normal(size=(self._num_users, self._k), 
+                                                   scale=0.01)
+        self._user_biases = np.zeros([self._num_users, 1])
+        self._item_biases = np.zeros([self._num_items, 1])
+                
+    def continue_fit(self, epochs, early_stop=True):
+        # Retrieve sample locations
+        users, items = self._M.nonzero()
+        self._num_samples = len(users)
+        self._mask = (self._M != 0)
+                
+        self._run_epochs(users, items, epochs, early_stop=early_stop)
+
+    def pop_user(self):
+        self._M = self._M[:-1, :]        
+        self._user_features = self._user_features[:-1, :]
         
     def top_n(self, user, n=10):
         """Return the top n recommendations for given user.
@@ -301,36 +293,9 @@ class SVDPredictor:
 
     # Cannot use lambda due to pickling
     def _default_list(self):
-        return []
+        return []  
 
-    # TODO
-    def _loading_bar(self, percent):
-        pass          
-
-class LogisticSVD(SVDPredictor):
-    def __init__(self, num_users, num_items, num_ratings, k=10, learning_rate=0.01, epochs=5,
-                  C=0.02, partial_batch_size=int(1e5)):
-        self._num_users = num_users
-        self._num_items = num_items
-        self._num_ratings = num_ratings
-        
-        self._k = k
-        self._learning_rate = learning_rate
-        self._epochs = epochs
-        self._C = C
-        self._lrate_C = self._learning_rate*self._C
-        self._partial_batch_size = partial_batch_size
-        
-        self._user_features = np.random.normal(size=(self._num_users, self._k), 
-                                               scale=0.01)
-        self._item_features = np.random.normal(size=(self._num_items, self._k), 
-                                               scale=0.01)
-        
-        self._M = None
-        self._num_samples = None
-        self._train_errors = None
-        self._val_errors = None
-
+class LogisticSVD(SVDBase):
     def predict(self, user, item):
         """Predict users rating of item. User and item are indices corresponding
         to user-item matrix."""

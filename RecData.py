@@ -153,21 +153,14 @@ class RecData:
             top = top[:min(n, len(top))]
         
         return top
-    
-    def transform(self, sample):
-        """"Sample should be a row vector of reviews, with NaNs for missing."""
-        sample += 1
-        sample = np.nan_to_num(sample)
-        sample = csr_array(sample)
-        return sample
         
     def search_title(self, title):
         """Finds all results for title and returns the matching title and index pairs."""
-        title = title.lower()
+        title_lower = title.lower()
         results = []
         for key, value in self._index_to_title.items():
-            value = value.lower()
-            if title in value:
+            value_lower = value.lower()
+            if title_lower in value_lower:
                 results.append((value, key))
                 
         return results
