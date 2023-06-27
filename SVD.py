@@ -15,7 +15,6 @@ class Metrics:
 class SVDBase():
     def __init__(self, num_users, num_items, num_ratings, k=10, learning_rate=0.01,
                   C=0.02, partial_batch_size=int(1e5)):
-        
         self._num_users = num_users
         self._num_items = num_items
         self._num_ratings = num_ratings
@@ -39,41 +38,43 @@ class SVDBase():
     def fit(self, M, epochs, validation_set=None, tol=1e-15, early_stop=True):
         """Fit the model with the given user-item matrix M (csr array)."""
         self._M = M 
+        
         self._validation_set = validation_set
         self._tol = tol
         self._train_errors = []
-        self._cache_users_rated(self._M)
         if validation_set:
             self._val_errors = []
+        self._cache_users_rated(self._M)
             
         # Retrieve sample locations
-        users, items = self._M.nonzero()
-        self._num_samples = len(users)
+        self._users, self._items = self._M.nonzero()
+        self._num_samples = len(self._users)
         self._mask = (self._M != 0)
 
-        self._run_epochs(users, items, epochs, early_stop=early_stop)
-        
+        self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
+
+    def continue_fit(self, epochs, early_stop=True):                
+        self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
+
     def partial_fit(self, new_sample, compute_err=False):
         """"Faciliates online training. Add new user vector new_sample into the 
         model and fit with warm start."""
-        users, items = self._M.nonzero()
         self._M = csr_array(vstack([self._M, new_sample]))
         total_users, total_items = self._M.nonzero()
         
         self._mask = (self._M != 0)
         
-        num_samples = len(users)
         self._num_users += 1
         
         self._user_features = np.concatenate(
             [self._user_features, np.random.normal(size=(1, self._k), scale=0.01)], axis=0)
                                                                                
-        indices_of_new = [new_i for new_i in range(len(users), len(total_users))]
+        indices_of_new = [new_i for new_i in range(len(self._users), len(total_users))]
                                               
         for epoch in range(self._epochs):
             start_time = time.time()
             # Choose a smaller subset of total samples already fitted
-            fitted_subset = random.sample(range(num_samples), k=self._partial_batch_size)    
+            fitted_subset = random.sample(range(self._num_samples), k=self._partial_batch_size)    
             
             # Ensure that new indices are always used
             possible_indices = fitted_subset + indices_of_new
@@ -86,6 +87,66 @@ class SVDBase():
             if compute_err:
                 self._compute_error()
             print("Time:", round(time.time() - start_time, 2), "seconds")
+
+    def pop_user(self):
+        self._M = self._M[:-1, :]        
+        self._user_features = self._user_features[:-1, :]
+
+    def top_n(self, user, n=10):
+        """Return the top n recommendations for given user.
+        
+        Parameters:
+            user (int) - The index of the user
+            n (int) - The number of recommendations to give
+            
+        Preconditions:
+            n > 0"""        
+        top = []
+        for item in range(self._num_items):
+            # Do not add items for which rating already exists
+            if item in self._users_rated[user]:
+                continue
+                
+            predicted_rating = self.predict(user, item)
+            
+            top.append((predicted_rating, item))
+            top.sort(key=lambda x: x[0], reverse=True)
+            top = top[:min(n, len(top))]
+        
+        return top
+    
+    def predict_pairs(self, pairs):
+        """Returns a list of predictions of the form (user, item, prediction) 
+        for each (user, item) pair in pairs.
+        
+        Parameters:
+            pairs (list) - List of (user, item) tuples.
+            
+        Returns:
+            List of (user, item, prediction) tuples."""
+        predictions = []
+        for user, item in pairs:
+            prediction = self.predict(user, item)
+            predictions.append((user, item, prediction))
+        
+        return predictions
+
+    def get_train_errors(self):
+        """Return the training errors stored while training. Returns none if 
+        model has not been fit."""
+        return self._train_errors
+    
+    def get_val_errors(self):
+        """Return the validation errors stored while training. Returns none if 
+        model has not been fit."""
+        return self._val_errors
+
+    def _cache_users_rated(self):
+        self._users_rated = defaultdict(self._default_list)
+        for sample_num in range(self._num_samples):
+            user = self._users[sample_num]
+            item = self._items[sample_num]
+            self._users_rated[user].append(item)
 
     def _run_epochs(self, users, items, epochs, early_stop=False):
         for epoch in range(epochs):
@@ -113,8 +174,10 @@ class SVDBase():
                     print("Small change in validation error. Terminating training.")
                     return
             
-    
-
+    # Cannot use lambda due to pickling
+    def _default_list(self):
+        return []  
+            
 class SVDPredictor(SVDBase):
     """SVD for collaborative filtering"""
     def __init__(self, num_users, num_items, num_ratings, k=10, learning_rate=0.01,
@@ -123,48 +186,12 @@ class SVDPredictor(SVDBase):
                           learning_rate=learning_rate, C=C, 
                           partial_batch_size=partial_batch_size)
         
-        
+        self._user_biases = np.zeros([self._num_users, 1])
+        self._item_biases = np.zeros([self._num_items, 1])
         self._item_implicit = np.random.normal(size=(self._num_items, self._k), 
                                                    scale=0.01)
         self._user_implicit = np.random.normal(size=(self._num_users, self._k), 
                                                    scale=0.01)
-        self._user_biases = np.zeros([self._num_users, 1])
-        self._item_biases = np.zeros([self._num_items, 1])
-                
-    def continue_fit(self, epochs, early_stop=True):
-        # Retrieve sample locations
-        users, items = self._M.nonzero()
-        self._num_samples = len(users)
-        self._mask = (self._M != 0)
-                
-        self._run_epochs(users, items, epochs, early_stop=early_stop)
-
-    def pop_user(self):
-        self._M = self._M[:-1, :]        
-        self._user_features = self._user_features[:-1, :]
-        
-    def top_n(self, user, n=10):
-        """Return the top n recommendations for given user.
-        
-        Parameters:
-            user (int) - The index of the user
-            n (int) - The number of recommendations to give
-            
-        Preconditions:
-            n > 0"""        
-        top = []
-        for item in range(self._num_items):
-            # Do not add items for which rating already exists
-            if item in self._users_rated[user]:
-                continue
-                
-            predicted_rating = self.predict(user, item)
-            
-            top.append((predicted_rating, item))
-            top.sort(key=lambda x: x[0], reverse=True)
-            top = top[:min(n, len(top))]
-        
-        return top
     
     def predict(self, user, item):
         """Predict users rating of item. User and item are indices corresponding
@@ -176,32 +203,6 @@ class SVDPredictor(SVDBase):
                    + self._user_implicit_features(user))
                 @ np.transpose(self._item_features[item, :])
                 )
-        
-    def predict_pairs(self, pairs):
-        """Returns a list of predictions of the form (user, item, prediction) 
-        for each (user, item) pair in pairs.
-        
-        Parameters:
-            pairs (list) - List of (user, item) tuples.
-            
-        Returns:
-            List of (user, item, prediction) tuples."""
-        predictions = []
-        for user, item in pairs:
-            prediction = self.predict(user, item)
-            predictions.append((user, item, prediction))
-        
-        return predictions
-    
-    def get_train_errors(self):
-        """Return the training errors stored while training. Returns none if 
-        model has not been fit."""
-        return self._train_errors
-    
-    def get_val_errors(self):
-        """Return the validation errors stored while training. Returns none if 
-        model has not been fit."""
-        return self._val_errors
     
     def _update_features(self, i, users, items, do_items=True):
         user = users[i]
@@ -282,18 +283,6 @@ class SVDPredictor(SVDBase):
         val_error = metrics.rmse(predictions)
         self._val_errors.append(val_error)
         print("Validation error:", val_error, end="/")
-
-    def _cache_users_rated(self, M):
-        self._users_rated = defaultdict(self._default_list)
-        users, items = M.nonzero()
-        for sample_num in range(len(users)):
-            user = users[sample_num]
-            item = items[sample_num]
-            self._users_rated[user].append(item)
-
-    # Cannot use lambda due to pickling
-    def _default_list(self):
-        return []  
 
 class LogisticSVD(SVDBase):
     def predict(self, user, item):
