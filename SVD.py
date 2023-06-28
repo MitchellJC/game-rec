@@ -446,10 +446,6 @@ class FastLogisticSVD(LogisticSVD):
                                 self._learning_rate,
                                 self._lrate_C)
                 ) 
-                # if np.isnan(self._user_features).any() or np.isinf(self._user_features).any():
-                #     print("in user")
-                # if np.isnan(self._item_features).any() or np.isinf(self._item_features).any():
-                #      print("in item")
             
             # Display training information
             print("Epoch", epoch, end="/")
@@ -491,18 +487,6 @@ def update_fast(i, user, item, values, user_features, item_features, learning_ra
     coeff = learning_rate*( 
         ( -(1 - true)*ab*pred )/(1 - pred) + true*ab 
         )
-    
-    # if coeff > 1e5 or coeff < -1e5:
-    #     print(coeff)
-    # coeff = np.maximum(coeff, -1)
-    # coeff = np.minimum(coeff, 1)
-    # if np.isinf(coeff):
-    #     print(coeff)
-    #     coeff = 1
-    # if np.isnan(coeff):
-    #     # print(coeff)
-    #     coeff = -1
-    
     
     # Compute user features update
     new_user_features = (
