@@ -452,13 +452,15 @@ class FastLogisticSVD(LogisticSVD):
                 #      print("in item")
             
             # Display training information
-            print("Epoch", epoch)
-            self._compute_error()
-            
+            print("Epoch", epoch, end="/")
+            loss = self._compute_error()
+            print("Training error:", loss, end="/")
+
             if self._validation_set:
-                self._compute_val_error()
+                val_loss = self._compute_val_error()
+                print("Validation error:", val_loss, end="/")
                 
-            print("\tTime:", round(time.time() - start_time, 2), "seconds")
+            print("Time:", round(time.time() - start_time, 2), "seconds")
             
             # Convergence criterion
             if (self._validation_set 
@@ -471,12 +473,12 @@ class FastLogisticSVD(LogisticSVD):
 
     def _compute_error(self):
         self._M = self._M.tocsr()
-        compute_error_fast(self._M.data, self._M.indices, self._M.indptr, 
+        return compute_error_fast(self._M.data, self._M.indices, self._M.indptr, 
                            self._num_samples, self._train_errors, self._epoch,
                            self._user_features, self._item_features)
         
     def _compute_val_error(self):
-        compute_val_error_fast(self._val_errors, List(self._validation_set), self._epoch,
+        return compute_val_error_fast(self._val_errors, List(self._validation_set), self._epoch,
                                self._user_features, self._item_features)
         
 @jit(nopython=True)
@@ -542,7 +544,8 @@ def compute_error_fast(values, indices, indptr, num_samples, train_errors,
 
     loss *= -(1/num_samples)
     train_errors[epoch] = loss
-    print("\tTraining error:", loss)
+
+    return loss
 
 @jit(nopython=True)
 def compute_val_error_fast(val_errors, validation_set,
@@ -563,7 +566,8 @@ def compute_val_error_fast(val_errors, validation_set,
 
     val_error *= -(1/len(predictions))
     val_errors[epoch] = val_error
-    print("\tValidation error:", val_error)
+
+    return val_error
 
 @jit(nopython=True)
 def sigmoid_fast(x):
