@@ -484,11 +484,23 @@ def update_fast(i, user, item, values, user_features, item_features, learning_ra
     # Pre-cache computations
     true = values[i] - 1
     pred = predict_fast(user, item, user_features, item_features)
-    a = np.exp(np.dot(user_features[user, :], item_features[item, :]))
+    a = np.exp(-np.dot(user_features[user, :], item_features[item, :]))
     ab = a*pred
     coeff = learning_rate*( 
         ( -(1 - true)*ab*pred )/(1 - pred) + true*ab 
         )
+    
+    # if coeff > 1e5 or coeff < -1e5:
+    #     print(coeff)
+    # coeff = np.maximum(coeff, -1)
+    # coeff = np.minimum(coeff, 1)
+    # if np.isinf(coeff):
+    #     print(coeff)
+    #     coeff = 1
+    # if np.isnan(coeff):
+    #     # print(coeff)
+    #     coeff = -1
+    
     
     # Compute user features update
     new_user_features = (
@@ -548,8 +560,6 @@ def compute_val_error_fast(val_errors, validation_set,
     for user, item, pred, true in predictions:
         
         val_error += true*np.log(pred) + (1 - true)*np.log(1 - pred)
-        # if np.isnan(val_error):
-        #     print(val_error, pred, 1 - true, 1-pred)
 
     val_error *= -(1/len(predictions))
     val_errors[epoch] = val_error
