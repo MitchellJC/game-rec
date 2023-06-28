@@ -391,6 +391,7 @@ class LogisticSVD(SVDBase):
 class FastLogisticSVD(LogisticSVD):
     def fit(self, M, epochs, validation_set=None, tol=1e-15, early_stop=True):
         self._M = M 
+        self._M = self._M.tocsr()
         
         self._validation_set = validation_set
         self._tol = tol
@@ -428,11 +429,19 @@ class FastLogisticSVD(LogisticSVD):
             # For all samples in random order update each parameter
             for i in random.sample(range(self._num_samples), k=self._num_samples):
                 self._user_features, self._item_features = (
+                    
+                    # update_fast(i, users[i], items[i], self._M.data, 
+                    #             self._user_features,
+                    #             self._item_features,
+                    #             self._learning_rate,
+                    #             self._lrate_C)
                     update_fast(i, users[i], items[i], self._M.data, 
                                 self._user_features,
                                 self._item_features,
                                 self._learning_rate,
-                                self._lrate_C))  
+                                self._lrate_C)
+                                ) 
+                 
             
             # Display training information
             print("Epoch", epoch)
@@ -459,15 +468,13 @@ class FastLogisticSVD(LogisticSVD):
                            self._user_features, self._item_features)
         
     def _compute_val_error(self):
-        compute_val_error_fast(self._val_errors, self._validation_set, self._epoch,
+        compute_val_error_fast(self._val_errors, List(self._validation_set), self._epoch,
                                self._user_features, self._item_features)
         
 @jit(nopython=True)
-def update_fast(i, user, item, values, 
-                user_features, item_features, learning_rate, lrate_C,
-                do_items=True):
+def update_fast(i, user, item, values, user_features, item_features, learning_rate, lrate_C, do_items=True):
     # Pre-cache computations
-    true = values[i]
+    true = values[i] - 1
     pred = predict_fast(user, item, user_features, item_features)
     a = np.exp(user_features[user, :] 
                 @ np.transpose(item_features[item, :]))
@@ -488,10 +495,11 @@ def update_fast(i, user, item, values,
             item_features[item, :] + user_features[user, :]*coeff
             -lrate_C*item_features[item, :]
         )
-    else:
-        new_item_features = None
-        
-    return new_user_features, new_item_features
+        item_features[item, :] = new_item_features
+    
+    user_features[user, :] = new_user_features
+
+    return user_features, item_features
 
 @jit(nopython=True)
 def compute_error_fast(values, indices, indptr, num_samples, train_errors, 
