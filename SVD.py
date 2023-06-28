@@ -7,9 +7,8 @@ import math
 import numpy as np
 
 import numba as nb
-from numba import jit, njit
+from numba import jit, njit, float64, uint32
 from numba.typed import List, Dict
-from numba.types import ListType, uint32
 
 class Metrics:
     def rmse(self, predictions):
@@ -39,10 +38,10 @@ class SVDBase():
         self._C = C
         self._lrate_C = self._learning_rate*self._C
         
-        self._user_features = np.random.normal(size=(self._num_users, self._k), 
-                                               scale=0.01)
-        self._item_features = np.random.normal(size=(self._num_items, self._k), 
-                                               scale=0.01)
+        self._user_features = np.array(np.random.normal(size=(self._num_users, self._k), 
+                                               scale=0.01), dtype=np.float64)
+        self._item_features = np.array(np.random.normal(size=(self._num_items, self._k), 
+                                               scale=0.01), dtype=np.float64)
         
         self._M = None
         self._num_samples = None
@@ -90,15 +89,20 @@ class SVDBase():
             batch_size (int) - The number of users to mix-in for training
             compute_err (bool) - True to enable training error computation"""
         self._num_users += 1
-        self._M = csr_array(vstack([self._M, new_sample]))
+        self._M = csr_array(vstack([lil_array(self._M), new_sample]))
         total_users, total_items = self._M.nonzero()
+        self._users, self._items = total_users, total_items
+        self._num_samples = len(total_users)
         
         self._mask = (self._M != 0)
         
         self._user_features = np.concatenate(
             [self._user_features, np.random.normal(size=(1, self._k), scale=0.01)], axis=0)
                                                                                
-        indices_of_new = [new_i for new_i in range(len(self._users), len(total_users))]
+        indices_of_new = [new_i for new_i in range(self._num_users - 1, len(total_users))]
+
+        self._cache_users_rated()
+
                                               
         for epoch in range(epochs):
             start_time = time.time()
@@ -110,7 +114,13 @@ class SVDBase():
             
             # Perform update for each sample
             for i in random.sample(possible_indices , k=len(possible_indices)):
-                self._update_features(i, total_users, total_items, do_items=False)
+                self._user_features, self._item_features = (
+                    update_fast(i, total_users[i], total_items[i], self._M.data, 
+                                self._user_features,
+                                self._item_features,
+                                self._learning_rate,
+                                self._lrate_C)
+                ) 
             
             print("Epoch", epoch, end="/")
             if compute_err:
@@ -422,6 +432,7 @@ class FastLogisticSVD(LogisticSVD):
             self._users_rated[user].append(item)
     
     def _run_epochs(self, users, items, epochs, early_stop=False):
+        self._M = csr_array(self._M)
         for epoch in range(epochs):
             self._epoch = epoch
             start_time = time.time()
@@ -429,19 +440,16 @@ class FastLogisticSVD(LogisticSVD):
             # For all samples in random order update each parameter
             for i in random.sample(range(self._num_samples), k=self._num_samples):
                 self._user_features, self._item_features = (
-                    
-                    # update_fast(i, users[i], items[i], self._M.data, 
-                    #             self._user_features,
-                    #             self._item_features,
-                    #             self._learning_rate,
-                    #             self._lrate_C)
                     update_fast(i, users[i], items[i], self._M.data, 
                                 self._user_features,
                                 self._item_features,
                                 self._learning_rate,
                                 self._lrate_C)
-                                ) 
-                 
+                ) 
+                # if np.isnan(self._user_features).any() or np.isinf(self._user_features).any():
+                #     print("in user")
+                # if np.isnan(self._item_features).any() or np.isinf(self._item_features).any():
+                #      print("in item")
             
             # Display training information
             print("Epoch", epoch)
@@ -450,7 +458,7 @@ class FastLogisticSVD(LogisticSVD):
             if self._validation_set:
                 self._compute_val_error()
                 
-            print("Time:", round(time.time() - start_time, 2), "seconds")
+            print("\tTime:", round(time.time() - start_time, 2), "seconds")
             
             # Convergence criterion
             if (self._validation_set 
@@ -476,8 +484,7 @@ def update_fast(i, user, item, values, user_features, item_features, learning_ra
     # Pre-cache computations
     true = values[i] - 1
     pred = predict_fast(user, item, user_features, item_features)
-    a = np.exp(user_features[user, :] 
-                @ np.transpose(item_features[item, :]))
+    a = np.exp(np.dot(user_features[user, :], item_features[item, :]))
     ab = a*pred
     coeff = learning_rate*( 
         ( -(1 - true)*ab*pred )/(1 - pred) + true*ab 
@@ -523,7 +530,7 @@ def compute_error_fast(values, indices, indptr, num_samples, train_errors,
 
     loss *= -(1/num_samples)
     train_errors[epoch] = loss
-    print("Training error:", loss)
+    print("\tTraining error:", loss)
 
 @jit(nopython=True)
 def compute_val_error_fast(val_errors, validation_set,
@@ -539,18 +546,31 @@ def compute_val_error_fast(val_errors, validation_set,
     
     val_error = 0
     for user, item, pred, true in predictions:
+        
         val_error += true*np.log(pred) + (1 - true)*np.log(1 - pred)
+        # if np.isnan(val_error):
+        #     print(val_error, pred, 1 - true, 1-pred)
 
     val_error *= -(1/len(predictions))
     val_errors[epoch] = val_error
-    print("Validation error:", val_error)
+    print("\tValidation error:", val_error)
+
+@jit(nopython=True)
+def sigmoid_fast(x):
+    if np.isnan(x):
+        print("x is nan!!!!!!!!")
+    return 1/(1 + np.exp(-x))
 
 @jit(nopython=True)
 def predict_fast(user, item, user_features, item_features):
-    return sigmoid_fast(
-            user_features[user, :]   
-            @ np.transpose(item_features[item, :])
+    sig = sigmoid_fast(
+            np.dot(user_features[user, :], item_features[item, :])
             )
+    sig = np.minimum(sig, 0.9999)
+    sig = np.maximum(sig, 0.00001)
+    if np.isnan(sig):
+        sig = 0.9999
+    return sig
 
 @jit(nopython=True)
 def predict_pairs_fast(pairs, user_features, item_features):
@@ -569,7 +589,5 @@ def predict_pairs_fast(pairs, user_features, item_features):
         
         return predictions
 
-@jit(nopython=True)
-def sigmoid_fast(x):
-    return 1/(1 + np.exp(-x))
+
 
