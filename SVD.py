@@ -47,6 +47,7 @@ class SVDBase():
         self._num_samples = None
         self._train_errors = None
         self._val_errors = None
+        self._epoch = -1
 
     def fit(self, M, epochs, validation_set=None, tol=1e-15, early_stop=True):
         """Fit the model with the given utility matrix M (csr array).
@@ -76,7 +77,7 @@ class SVDBase():
         self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
 
     def continue_fit(self, epochs, early_stop=True):
-        """Continue training for extra epochs"""           
+        """Continue training for extra epochs"""          
         self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
 
     def partial_fit(self, new_sample, epochs, batch_size=0, compute_err=False):
@@ -145,7 +146,7 @@ class SVDBase():
         top = []
         for item in range(self._num_items):
             # Do not add items for which rating already exists
-            if item in self._users_rated[user]:
+            if user in self._users_rated and item in self._users_rated[user]:
                 continue
                 
             predicted_rating = self.predict(user, item)
@@ -418,6 +419,18 @@ class FastLogisticSVD(LogisticSVD):
 
         self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
 
+    def continue_fit(self, epochs, early_stop=True):
+        """Continue training for extra epochs"""      
+        new_train_errors = np.zeros([self._train_errors.shape[0] + epochs])
+        new_val_errors = np.zeros([self._train_errors.shape[0] + epochs])   
+
+        new_train_errors[:self._train_errors.shape[0]] = self._train_errors
+        new_val_errors[:self._val_errors.shape[0]] = self._val_errors
+
+        self._train_errors = new_train_errors
+        self._val_errors = new_val_errors
+        self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
+
     def predict(self, user, item):
         return predict_fast(user, item, self._user_features, 
                                   self._item_features)
@@ -434,7 +447,7 @@ class FastLogisticSVD(LogisticSVD):
     def _run_epochs(self, users, items, epochs, early_stop=False):
         self._M = csr_array(self._M)
         for epoch in range(epochs):
-            self._epoch = epoch
+            self._epoch += 1
             start_time = time.time()
             
             # For all samples in random order update each parameter
