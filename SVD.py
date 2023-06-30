@@ -108,10 +108,10 @@ class SVDBase():
         for epoch in range(epochs):
             start_time = time.time()
             # Choose a smaller subset of total samples already fitted
-            fitted_subset = random.sample(range(self._num_samples), k=batch_size)    
+            # fitted_subset = random.sample(range(self._num_samples), k=batch_size)    
             
             # Ensure that new indices are always used
-            possible_indices = fitted_subset + indices_of_new
+            possible_indices =  indices_of_new # + fitted_subset
             
             # Perform update for each sample
             for i in random.sample(possible_indices , k=len(possible_indices)):
@@ -570,6 +570,7 @@ def compute_val_error_fast(val_errors, validation_set,
 def sigmoid_fast(x):
     if np.isnan(x):
         print("x is nan!!!!!!!!")
+        raise ValueError()
     return 1/(1 + np.exp(-x))
 
 @jit(nopython=True)
