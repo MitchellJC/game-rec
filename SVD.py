@@ -5,6 +5,7 @@ import time
 import random
 import math
 import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
 
 import numba as nb
 from numba import jit, njit, float64, uint32
@@ -14,6 +15,9 @@ class Metrics:
     def rmse(self, predictions):
         return math.sqrt(sum((prediction - true_rating)**2 for _, _, prediction, 
                              true_rating in predictions)/len(predictions))
+    
+    def recall(self, top, ratings):
+        pass
 
 class SVDBase():
     """Base class for funk svd"""
@@ -434,6 +438,42 @@ class FastLogisticSVD(LogisticSVD):
     def predict(self, user, item):
         return predict_fast(user, item, self._user_features, 
                                   self._item_features)
+    
+    def compute_sims(self):
+        start_t = time.time()
+        q = self._item_features
+        self._sims = lil_array((q.shape[0], q.shape[0]))
+        print("Computing similarities...")
+        for i in range(q.shape[0]):
+            if i % 200 == 0:
+                print("Upto row", i)
+            for j in range(i, q.shape[0]):
+                self._sims[i, j] = cosine_similarity(q[[i], :], q[[j], :])
+        print("Done computing similarities in", time.time() - start_t, "seconds")
+    
+    def items_knn(self, subjects, n=10):
+        top = []
+        for j in range(self._sims.shape[0]):
+            if j in [i for i, _ in subjects]:
+                continue  
+            
+            total = 0
+            for i, pref in subjects:
+                if j < i:
+                    sim = self._sims[j, i]
+                elif j > i:
+                    sim = self._sims[i, j]
+                    
+                if pref == 0:
+                    sim = 1 - sim
+                
+                total += sim
+            
+            avg = total/len(subjects)
+            top.append((avg, j))
+            top.sort(reverse=True)
+            top = top[:n]
+        return top
     
     def _cache_users_rated(self):
         self._users_rated = {}
