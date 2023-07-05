@@ -491,11 +491,13 @@ class FastLogisticSVD(LogisticSVD):
         #     i = (i + 1) % len(knns)            
 
         # return top
+
         filtered = []
         for subject in subjects:
             filtered += self.items_knn([subject], n=200)
 
-        print(filtered[:250])
+        filtered = list(set([item_id for _, item_id in filtered])) # Remove duplicates
+        return filtered        
 
     def compute_recall(self, test, k=20):
         tops = {}

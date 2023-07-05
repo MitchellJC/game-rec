@@ -173,6 +173,15 @@ class RecData:
             index (int) - The item index."""
         return self._index_to_title[index]
     
+    def index_to_user_id(self, index):
+        return self._index_to_userid[index]
+    
+    def index_to_item_id(self, index):
+        return self._index_to_itemid[index]
+    
+    def item_id_to_index(self, i):
+        return self._itemid_to_index[i]
+    
     def top_n(self, user, n=10):
         """Return the true top n list for user.
         
