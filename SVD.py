@@ -5,7 +5,7 @@ import time
 import random
 import math
 import numpy as np
-from queue import Queue
+from queue import SimpleQueue
 from sklearn.metrics.pairwise import cosine_similarity
 
 import numba as nb
@@ -492,9 +492,6 @@ class FastLogisticSVD(LogisticSVD):
 
         return top
 
-
-
-    
     def compute_recall(self, test, k=20):
         tops = {}
         hits = 0
