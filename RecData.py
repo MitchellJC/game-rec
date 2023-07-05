@@ -4,7 +4,8 @@ from scipy.sparse import csr_array, lil_array
 
 class RecData:
     def create_from_dataframe(self, data):
-        """Create rec data from a Pandas dataframe. Columns must be in the form [item-id, rating, user_id]"""
+        """Create rec data from a Pandas dataframe. Columns must be in the form 
+        [item-id, rating, user_id]"""
         # Create user-item rating matrix
         self._num_items = data[data.columns[0]].nunique()
         self._num_users = data[data.columns[2]].nunique()
@@ -38,10 +39,6 @@ class RecData:
             self._M[user_index, item_index] = rating
         print("Done utility matrix.")
 
-        # self._M = data.pivot_table(index=data.columns[2], columns=data.columns[0], values=data.columns[1], aggfunc='mean')
-        # self._userid_to_index = {user_id: i for i, user_id in enumerate(self._M.index)}
-        # self._itemid_to_index = {app_id: i for i, app_id in enumerate(self._M.columns)}
-
         self._index_to_userid = {i: user_id for user_id, i in self._userid_to_index.items()}
         self._index_to_itemid = {i: app_id for app_id, i in self._itemid_to_index.items()}
         
@@ -49,14 +46,6 @@ class RecData:
         self._items = [item for item in self._itemid_to_index.keys()]
         self._num_users = len(self._users)
         self._num_items = len(self._items)
-        
-        # self._M = self._M.to_numpy()
-        
-        # # Shift ratings up to assign 0 to missing values
-        # self._M += 1
-        # self._M = np.nan_to_num(self._M)
-        
-        # self._M = csr_array(self._M)
                 
     def leave_k_out_split(self, k=1):
         M_prime = self._M.copy()

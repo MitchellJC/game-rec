@@ -5,6 +5,7 @@ import time
 import random
 import math
 import numpy as np
+from queue import Queue
 from sklearn.metrics.pairwise import cosine_similarity
 
 import numba as nb
@@ -15,9 +16,6 @@ class Metrics:
     def rmse(self, predictions):
         return math.sqrt(sum((prediction - true_rating)**2 for _, _, prediction, 
                              true_rating in predictions)/len(predictions))
-    
-    def recall(self, top, ratings):
-        pass
 
 class SVDBase():
     """Base class for funk svd"""
@@ -463,9 +461,9 @@ class FastLogisticSVD(LogisticSVD):
                     sim = self._sims[j, i]
                 elif j > i:
                     sim = self._sims[i, j]
-                    
-                if pref == 0:
-                    sim = 1 - sim
+                        
+                if pref == 0: # Convert to dissimilarity
+                    sim = 1 - sim 
                 
                 total += sim
             
@@ -474,7 +472,57 @@ class FastLogisticSVD(LogisticSVD):
             top.sort(reverse=True)
             top = top[:n]
         return top
+
+    def items_top_n(self, subjects, n=10):
+        top = []
+        knns = []
+
+        # Find nearest neighbour for each item
+        for subject in subjects:
+            knn = SimpleQueue()
+            [knn.put(item) for item in self.items_knn([subject], n=n)]
+            knns.append(knn)
+
+        # Build top-n
+        i = 0
+        while len(top) != n:
+            top.append(knns[i].get())
+
+            i = (i + 1) % len(knns)            
+
+        return top
+
+
+
     
+    def compute_recall(self, test, k=20):
+        tops = {}
+        hits = 0
+        num_rel = 0
+
+        # Generate top lists
+        i = 0
+        for user, item, rating in test:
+            if i % 10000 == 0:
+                print("Generating top-n for user", i)
+
+            if user not in tops:
+                tops[user] = [item for _, item in self.top_n(user, n=k)]
+            
+            if rating == 1:
+                num_rel += 1
+
+            i += 1
+
+        # See how many hits we got
+        for user, item, rating in test:
+            if item in tops[user]:
+                hits += 1
+
+        recall = hits / num_rel
+        self._recall = recall
+        print(recall)
+
     def _cache_users_rated(self):
         self._users_rated = {}
         for sample_num in range(self._num_samples):
@@ -640,6 +688,4 @@ def predict_pairs_fast(pairs, user_features, item_features):
             predictions.append((user, item, prediction))
         
         return predictions
-
-
 
