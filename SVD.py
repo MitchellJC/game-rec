@@ -474,23 +474,28 @@ class FastLogisticSVD(LogisticSVD):
         return top
 
     def items_top_n(self, subjects, n=10):
-        top = []
-        knns = []
+        # top = []
+        # knns = []
 
-        # Find nearest neighbour for each item
+        # # Find nearest neighbour for each item
+        # for subject in subjects:
+        #     knn = SimpleQueue()
+        #     [knn.put(item) for item in self.items_knn([subject], n=n)]
+        #     knns.append(knn)
+
+        # # Build top-n
+        # i = 0
+        # while len(top) != n:
+        #     top.append(knns[i].get())
+
+        #     i = (i + 1) % len(knns)            
+
+        # return top
+        filtered = []
         for subject in subjects:
-            knn = SimpleQueue()
-            [knn.put(item) for item in self.items_knn([subject], n=n)]
-            knns.append(knn)
+            filtered += self.items_knn([subject], n=200)
 
-        # Build top-n
-        i = 0
-        while len(top) != n:
-            top.append(knns[i].get())
-
-            i = (i + 1) % len(knns)            
-
-        return top
+        print(filtered[:250])
 
     def compute_recall(self, test, k=20):
         tops = {}
@@ -572,9 +577,12 @@ class FastLogisticSVD(LogisticSVD):
                            self._user_features, self._item_features)
         
     def _compute_val_error(self):
-        return compute_val_error_fast(self._val_errors, List(self._validation_set), self._epoch,
-                               self._user_features, self._item_features)
-        
+        return compute_val_error_fast(self._val_errors, List(self._validation_set), 
+                                      self._epoch, self._user_features, 
+                                      self._item_features)
+
+# Fast Numba Methods
+################################################################################
 @jit(nopython=True)
 def update_fast(i, user, item, values, user_features, item_features, learning_rate, lrate_C, do_items=True):
     # Pre-cache computations
