@@ -462,10 +462,10 @@ class FastLogisticSVD(LogisticSVD):
                 elif j > i:
                     sim = self._sims[i, j]
                         
-                if pref == 0: # Convert to dissimilarity
-                    sim = 1 - sim 
+                # if pref == 0: # Convert to dissimilarity
+                #     sim = 1 - sim 
                 
-                total += sim
+                total += sim * pref
             
             avg = total/len(subjects)
             top.append((avg, j))
@@ -492,6 +492,7 @@ class FastLogisticSVD(LogisticSVD):
 
         # return top
 
+        # TODO probably stick with items_knn
         filtered = []
         for subject in subjects:
             filtered += self.items_knn([subject], n=200)
