@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import random
 from scipy.sparse import csr_array, lil_array
 
@@ -117,6 +118,32 @@ class RecData:
         
         return train_data, test
     
+    def generate_dataframe(self):
+        """Create and return Pandas DataFrame from utility matrix."""
+        app_ids = []
+        user_ids = []
+        ratings = []
+
+        # Build columns
+        users, items = self._M.nonzero()
+        num_nonzero = len(users)
+        for i in range(num_nonzero):
+            user, item = users[i], items[i]
+
+            app_id = self._index_to_itemid[item]
+            user_id = self._index_to_userid[user]
+            rating = self._M[user, item] - 1
+
+            app_ids.append(app_id)
+            user_ids.append(user_id)
+            ratings.append(rating)
+
+        # Create DataFrame from columns
+        columns = {'app_id': app_ids, 'is_recommended': ratings, 'user_id': user_ids}
+        df = pd.DataFrame(columns)
+        return df
+            
+
     def get_matrix(self):
         """Returns the user-item rating matrix."""
         return self._M
