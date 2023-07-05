@@ -5,7 +5,10 @@ from scipy.sparse import csr_array, lil_array
 class RecData:
     def create_from_dataframe(self, data):
         """Create rec data from a Pandas dataframe. Columns must be in the form 
-        [item-id, rating, user_id]"""
+        [item-id, rating, user_id]
+        
+        Parameters:
+            data (Pandas DataFrame)"""
         # Create user-item rating matrix
         self._num_items = data[data.columns[0]].nunique()
         self._num_users = data[data.columns[2]].nunique()
@@ -48,6 +51,13 @@ class RecData:
         self._num_items = len(self._items)
                 
     def leave_k_out_split(self, k=1):
+        """Generate a leave-k-out split, creates both a validation split and 
+        a test split. That is, 2*k data points will be left out.
+        
+        Returns:
+            train_data (RecData) - train split RecData object
+            val - List of tuples in the form [(user, item, rating)] for validation
+            test - List of tuples in the form [(user, item, rating)] for test"""
         M_prime = self._M.copy()
         val = []
         test = []
@@ -80,6 +90,14 @@ class RecData:
         return train_data, val, test
     
     def train_test_split(self, test_size=0.2):
+        """Generate a train test split.
+        
+        Parameters:
+            test_size (float) - the proportion of samples to put in test set.
+            
+        Returns:
+            train_data (RecData) - train split RecData object
+            test - List of tuples in the form [(user, item, rating)] for test"""
         M_prime = self._M.copy()
         test = []
 
@@ -100,26 +118,43 @@ class RecData:
         return train_data, test
     
     def get_matrix(self):
+        """Returns the user-item rating matrix."""
         return self._M
     
     def get_num_users(self):
+        """Returns the total number of unique users."""
         return self._num_users
     
     def get_num_items(self):
+        """Returns the total number of unique items."""
         return self._num_items
     
     def set_titles(self, titles):
-        """Maps titles to item ids using given DataFrame. Columns must be of the form [item_id, title]"""
+        """Maps titles to item ids using given DataFrame. Columns must be of the 
+        form [item_id, title]
+        
+        Parameters:
+            titles (Pandas DataFrame) - titles to assign to items"""
         self._index_to_title = {self._itemid_to_index[item_id]: title 
                                 for _, item_id, title in titles.itertuples() 
                                 if item_id in self._itemid_to_index}
         
     def index_to_title(self, index):
+        """Return the title of the item at the given index.
+        
+        Parameters:
+            index (int) - The item index."""
         return self._index_to_title[index]
     
     def top_n(self, user, n=10):
-        if self._M is None:
-            raise RuntimeError("Please ensure to call fit before generating top n")
+        """Return the true top n list for user.
+        
+        Parameters:
+            user (int) - Index of user.
+            n (int) - Number of top items to get.
+            
+        Returns:
+            top (List) - List of top items in the form (rating, item_index)."""
             
         users, items = self._M[[user], :].nonzero()
         num_samples = len(items)
@@ -144,7 +179,8 @@ class RecData:
         return top
         
     def search_title(self, title):
-        """Finds all results for title and returns the matching title and index pairs."""
+        """Finds all results for title and returns the matching title and 
+        index pairs."""
         title_lower = title.lower()
         results = []
         for key, value in self._index_to_title.items():
@@ -156,7 +192,8 @@ class RecData:
     
     def create_prefs(self, prefs):
         """Create a preference array from prefs tuples in the form (index, preference) 
-        where preference of 1 indicates recommend and preference of 0 indicated would not recommend."""
+        where preference of 1 indicates recommend and preference of 0 indicated 
+        would not recommend."""
         prefs_vec = lil_array(np.zeros([1, self._num_items]))
         for i, pref in prefs:
             pref += 1
