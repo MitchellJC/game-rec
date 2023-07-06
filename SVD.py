@@ -453,24 +453,6 @@ class FastLogisticSVD(LogisticSVD):
     
     def items_knn(self, subjects, n=10):
         top = []
-        # for j in range(self._sims.shape[0]):
-        #     if j in [i for i, _ in subjects]:
-        #         continue  
-            
-        #     total = 0
-        #     for i, pref in subjects:
-        #         if j < i:
-        #             sim = self._sims[j, i]
-        #         elif j > i:
-        #             sim = self._sims[i, j]
-                
-        #         total += sim * pref
-            
-        #     avg = total/len(subjects)
-        #     top.append((avg, j))
-        #     top.sort(reverse=True)
-        #     top = top[:n]
-
         # Get candidates
         for i, pref in subjects:
             if pref == 0:
