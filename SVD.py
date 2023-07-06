@@ -12,6 +12,8 @@ import numba as nb
 from numba import jit, njit, float64, uint32
 from numba.typed import List, Dict
 
+from RecData import RecData
+
 class Metrics:
     def rmse(self, predictions):
         return math.sqrt(sum((prediction - true_rating)**2 for _, _, prediction, 
@@ -451,26 +453,55 @@ class FastLogisticSVD(LogisticSVD):
     
     def items_knn(self, subjects, n=10):
         top = []
-        for j in range(self._sims.shape[0]):
-            if j in [i for i, _ in subjects]:
-                continue  
+        # for j in range(self._sims.shape[0]):
+        #     if j in [i for i, _ in subjects]:
+        #         continue  
             
-            total = 0
-            for i, pref in subjects:
+        #     total = 0
+        #     for i, pref in subjects:
+        #         if j < i:
+        #             sim = self._sims[j, i]
+        #         elif j > i:
+        #             sim = self._sims[i, j]
+                
+        #         total += sim * pref
+            
+        #     avg = total/len(subjects)
+        #     top.append((avg, j))
+        #     top.sort(reverse=True)
+        #     top = top[:n]
+
+        # Get candidates
+        for i, pref in subjects:
+            if pref == 0:
+                continue
+            
+            for j in range(self._sims.shape[0]):
                 if j < i:
                     sim = self._sims[j, i]
                 elif j > i:
                     sim = self._sims[i, j]
-                        
-                # if pref == 0: # Convert to dissimilarity
-                #     sim = 1 - sim 
-                
-                total += sim * pref
-            
-            avg = total/len(subjects)
-            top.append((avg, j))
-            top.sort(reverse=True)
-            top = top[:n]
+
+                top.append((sim, j))
+                top.sort(reverse=True)
+                top = top[:10*n]
+
+        # Filter already seen
+        seen = [id for id, pref, in subjects]
+        top = [cand for cand in top if cand[1] not in seen]
+
+        # Filter duplicates
+        new_top = []
+        seen = []
+        for score, id in top:
+            if id in seen:
+                continue
+
+            seen.append(id)
+            new_top.append((score, id))
+        top = new_top
+
+        top = top[:n]
         return top
 
     def items_top_n(self, subjects, n=10):
@@ -498,7 +529,24 @@ class FastLogisticSVD(LogisticSVD):
             filtered += self.items_knn([subject], n=200)
 
         filtered = list(set([item_id for _, item_id in filtered])) # Remove duplicates
-        return filtered        
+        return filtered      
+
+    def top_n(self, user, n=10):
+        """Return the top n recommendations for given user.
+        
+        Parameters:
+            user (int) - The index of the user
+            n (int) - The number of recommendations to give
+            
+        Preconditions:
+            n > 0"""        
+        prefs = self._M[user, :]
+        users, items = prefs.nonzero()
+        num_prefs = len(users)
+        prefs = [(items[i], prefs[0, items[i]] - 1) for i in range(num_prefs)]
+        top = self.items_knn(prefs, n=n)
+    
+        return top  
 
     def compute_recall(self, test, k=20):
         tops = {}
