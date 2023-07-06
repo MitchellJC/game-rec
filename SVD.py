@@ -477,7 +477,9 @@ class FastLogisticSVD(LogisticSVD):
                 continue
             
             for j in range(self._sims.shape[0]):
-                if j < i:
+                if i == j:
+                    continue
+                elif j < i:
                     sim = self._sims[j, i]
                 elif j > i:
                     sim = self._sims[i, j]
@@ -504,33 +506,6 @@ class FastLogisticSVD(LogisticSVD):
         top = top[:n]
         return top
 
-    def items_top_n(self, subjects, n=10):
-        # top = []
-        # knns = []
-
-        # # Find nearest neighbour for each item
-        # for subject in subjects:
-        #     knn = SimpleQueue()
-        #     [knn.put(item) for item in self.items_knn([subject], n=n)]
-        #     knns.append(knn)
-
-        # # Build top-n
-        # i = 0
-        # while len(top) != n:
-        #     top.append(knns[i].get())
-
-        #     i = (i + 1) % len(knns)            
-
-        # return top
-
-        # TODO probably stick with items_knn
-        filtered = []
-        for subject in subjects:
-            filtered += self.items_knn([subject], n=200)
-
-        filtered = list(set([item_id for _, item_id in filtered])) # Remove duplicates
-        return filtered      
-
     def top_n(self, user, n=10):
         """Return the top n recommendations for given user.
         
@@ -540,7 +515,7 @@ class FastLogisticSVD(LogisticSVD):
             
         Preconditions:
             n > 0"""        
-        prefs = self._M[user, :]
+        prefs = self._M[[user], :]
         users, items = prefs.nonzero()
         num_prefs = len(users)
         prefs = [(items[i], prefs[0, items[i]] - 1) for i in range(num_prefs)]
