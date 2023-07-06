@@ -452,7 +452,9 @@ class FastLogisticSVD(LogisticSVD):
         print("Done computing similarities in", time.time() - start_t, "seconds")
     
     def items_knn(self, subjects, n=10):
+        alpha = 0.1
         top = []
+        disliked = [(i, pref) for i, pref in subjects if pref == 0]
         # Get candidates
         for i, pref in subjects:
             if pref == 0:
@@ -465,6 +467,20 @@ class FastLogisticSVD(LogisticSVD):
                     sim = self._sims[j, i]
                 elif j > i:
                     sim = self._sims[i, j]
+
+                # Get min dissimilarity
+                dissims = [1]
+                for k, pref in disliked:
+                    if j == k:
+                        continue
+                    elif j < k:
+                        dissim = 1 - self._sims[j, k]*alpha
+                    elif j > k:
+                        dissim = 1 - self._sims[k, j]*alpha
+
+                    dissims.append(dissim)
+
+                sim *= min(dissims)
 
                 top.append((sim, j))
                 top.sort(reverse=True)
