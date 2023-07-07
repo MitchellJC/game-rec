@@ -111,7 +111,6 @@ class SVDBase():
         indices_of_new = [new_i for new_i in range(self._num_users - 1, len(total_users))]
 
         self._cache_users_rated()
-
                                               
         for epoch in range(epochs):
             start_time = time.time()
@@ -123,10 +122,13 @@ class SVDBase():
             
             # Perform update for each sample
             for i in random.sample(possible_indices , k=len(possible_indices)):
-                self._user_features, self._item_features = (
+                (self._user_features, self._item_features,
+                 self._user_biases, self._item_biases) = (
                     update_fast(i, total_users[i], total_items[i], self._M.data, 
                                 self._user_features,
                                 self._item_features,
+                                self._user_biases,
+                                self._item_biases,
                                 self._learning_rate,
                                 self._lrate_C)
                 ) 
@@ -190,6 +192,13 @@ class SVDBase():
         """Return the validation errors stored while training. Returns none if 
         model has not been fit."""
         return self._val_errors
+    
+    def prep_for_item_knn(self):
+        del self._user_features
+        del self._user_biases
+        del self._item_biases
+        del self._M
+        del self._mask
 
     def _cache_users_rated(self):
         self._users_rated = {}
@@ -449,6 +458,29 @@ class FastLogisticSVD(SVDBase):
         top = self.items_knn(prefs, n=n)
     
         return top  
+    
+    # def top_n(self, user, n=10):
+    #     """Return the top n recommendations for given user.
+        
+    #     Parameters:
+    #         user (int) - The index of the user
+    #         n (int) - The number of recommendations to give
+            
+    #     Preconditions:
+    #         n > 0"""        
+    #     top = []
+    #     for item in range(self._num_items):
+    #         # Do not add items for which rating already exists
+    #         if user in self._users_rated and item in self._users_rated[user]:
+    #             continue
+                
+    #         predicted_rating = self.predict(user, item)
+            
+    #         top.append((predicted_rating, item))
+    #         top.sort(key=lambda x: x[0], reverse=True)
+    #         top = top[:min(n, len(top))]
+        
+    #     return top
 
     def compute_recall(self, test, k=20):
         tops = {}

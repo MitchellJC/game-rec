@@ -69,7 +69,6 @@ class RecData:
             # Val holdout
             possible_indices = self._M[[user], :].nonzero()[1]
             if len(possible_indices) > k:
-                print("HELLO", user)
                 left_out = np.random.choice(possible_indices, k, replace=False)
                 for item in left_out:
                     M_prime[user, item] = 0
@@ -237,3 +236,6 @@ class RecData:
             
         prefs_vec = csr_array(prefs_vec)
         return prefs_vec
+    
+    def prep_for_item_knn(self):
+        del self._M
