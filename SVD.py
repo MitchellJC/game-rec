@@ -46,6 +46,10 @@ class SVDBase():
                                                scale=0.01), dtype=np.float64)
         self._item_features = np.array(np.random.normal(size=(self._num_items, self._k), 
                                                scale=0.01), dtype=np.float64)
+        self._user_biases = np.array(np.random.normal(size=(self._num_users, 1), 
+                                               scale=0.01), dtype=np.float64)
+        self._item_biases = np.array(np.random.normal(size=(self._num_items, 1), 
+                                               scale=0.01), dtype=np.float64)
         
         self._M = None
         self._num_samples = None
