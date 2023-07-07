@@ -358,6 +358,7 @@ class FastLogisticSVD(SVDBase):
         self._mask = (self._M != 0)
 
         self._cache_users_rated()
+        self._cache_user_item_weights()
 
         self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
 
@@ -518,6 +519,21 @@ class FastLogisticSVD(SVDBase):
             if user not in self._users_rated:
                 self._users_rated[user] = []
             self._users_rated[user].append(item)
+
+    def _cache_user_item_weights(self):
+        user_freqs = np.zeros([self._num_users, 1])
+        item_freqs = np.zeros([self._num_items, 1])
+        users, items = self._M.nonzero()
+        num_samples = len(users)
+
+        for i in range(num_samples):
+            user, item = users[i], items[i]
+
+            user_freqs[user, 0] += 1
+            item_freqs[item, 0] += 1
+
+        self._user_props = user_freqs/num_samples
+        self._item_props = item_freqs/num_samples
     
     def _run_epochs(self, users, items, epochs, early_stop=False):
         self._M = csr_array(self._M)
@@ -534,6 +550,8 @@ class FastLogisticSVD(SVDBase):
                                 self._item_features,
                                 self._user_biases,
                                 self._item_biases,
+                                self._user_props,
+                                self._item_props,
                                 self._learning_rate,
                                 self._lrate_C)
                 ) 
@@ -573,14 +591,17 @@ class FastLogisticSVD(SVDBase):
 ################################################################################
 @jit(nopython=True)
 def update_fast(i, user, item, values, user_features, item_features, user_biases, 
-                item_biases,
+                item_biases, user_prop, item_prop,
                 learning_rate, lrate_C, do_items=True):
     # Pre-cache computations
     true = values[i] - 1
-    pred = predict_fast(user, item, user_features, item_features, user_biases, item_biases)
-    a = np.exp(-( np.dot(user_features[user, :], item_features[item, :]) + user_biases[user, 0] + item_biases[item, 0] ))
+    pred = predict_fast(user, item, user_features, 
+                        item_features, user_biases, item_biases)
+    a = np.exp( -( np.dot(user_features[user, :], item_features[item, :]) 
+                  + user_biases[user, 0] + item_biases[item, 0] )
+    )
     ab = a*pred
-    coeff = learning_rate*( 
+    coeff = user_prop[user, 0]*item_prop[item, 0]*learning_rate*( 
         ( -(1 - true)*ab*pred )/(1 - pred) + true*ab 
         )
     
