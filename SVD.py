@@ -495,10 +495,13 @@ class FastLogisticSVD(SVDBase):
             
             # For all samples in random order update each parameter
             for i in random.sample(range(self._num_samples), k=self._num_samples):
-                self._user_features, self._item_features = (
+                (self._user_features, self._item_features, 
+                self._user_biases, self._item_biases) = (
                     update_fast(i, users[i], items[i], self._M.data, 
                                 self._user_features,
                                 self._item_features,
+                                self._user_biases,
+                                self._item_biases,
                                 self._learning_rate,
                                 self._lrate_C)
                 ) 
@@ -527,21 +530,23 @@ class FastLogisticSVD(SVDBase):
         self._M = self._M.tocsr()
         return compute_error_fast(self._M.data, self._M.indices, self._M.indptr, 
                            self._num_samples, self._train_errors, self._epoch,
-                           self._user_features, self._item_features)
+                           self._user_features, self._item_features, self._user_biases, self._item_biases)
         
     def _compute_val_error(self):
         return compute_val_error_fast(self._val_errors, List(self._validation_set), 
                                       self._epoch, self._user_features, 
-                                      self._item_features)
+                                      self._item_features, self._user_biases, self._item_biases)
 
 # Fast Numba Methods
 ################################################################################
 @jit(nopython=True)
-def update_fast(i, user, item, values, user_features, item_features, learning_rate, lrate_C, do_items=True):
+def update_fast(i, user, item, values, user_features, item_features, user_biases, 
+                item_biases,
+                learning_rate, lrate_C, do_items=True):
     # Pre-cache computations
     true = values[i] - 1
-    pred = predict_fast(user, item, user_features, item_features)
-    a = np.exp(-np.dot(user_features[user, :], item_features[item, :]))
+    pred = predict_fast(user, item, user_features, item_features, user_biases, item_biases)
+    a = np.exp(-( np.dot(user_features[user, :], item_features[item, :]) + user_biases[user, 0] + item_biases[item, 0] ))
     ab = a*pred
     coeff = learning_rate*( 
         ( -(1 - true)*ab*pred )/(1 - pred) + true*ab 
@@ -552,6 +557,10 @@ def update_fast(i, user, item, values, user_features, item_features, learning_ra
         user_features[user, :] + item_features[item, :]*coeff
         -lrate_C*user_features[user, :]
     )
+
+    new_user_biases = (
+        user_biases[user, 0] + coeff - lrate_C*user_biases[user, 0]
+    )
     
     if do_items:
         # Compute item features update
@@ -559,15 +568,21 @@ def update_fast(i, user, item, values, user_features, item_features, learning_ra
             item_features[item, :] + user_features[user, :]*coeff
             -lrate_C*item_features[item, :]
         )
-        item_features[item, :] = new_item_features
-    
-    user_features[user, :] = new_user_features
+        new_item_biases = (
+            item_biases[item, 0] + coeff - lrate_C*item_biases[item, 0]
+        )
 
-    return user_features, item_features
+        item_features[item, :] = new_item_features
+        item_biases[item, 0] = new_item_biases
+
+    user_features[user, :] = new_user_features
+    user_biases[user, 0] = new_user_biases
+
+    return user_features, item_features, user_biases, item_biases
 
 @jit(nopython=True)
 def compute_error_fast(values, indices, indptr, num_samples, train_errors, 
-                       epoch, user_features, item_features):
+                       epoch, user_features, item_features, user_biases, item_biases):
     loss = 0
 
     num_vals = 0
@@ -581,7 +596,7 @@ def compute_error_fast(values, indices, indptr, num_samples, train_errors,
             next_row_index += 1
 
         true = value - 1
-        pred = predict_fast(next_row_index - 1, column, user_features, item_features)
+        pred = predict_fast(next_row_index - 1, column, user_features, item_features, user_biases, item_biases)
 
         loss += true*np.log(pred) + (1 - true)*np.log(1 - pred)
 
@@ -592,11 +607,11 @@ def compute_error_fast(values, indices, indptr, num_samples, train_errors,
 
 @jit(nopython=True)
 def compute_val_error_fast(val_errors, validation_set,
-                       epoch, user_features, item_features):
+                       epoch, user_features, item_features, user_biases, item_biases):
    # Predict rating for all pairs in validation
     predictions = predict_pairs_fast([(user, item) 
                                 for user, item, _ in validation_set], 
-                                user_features, item_features)
+                                user_features, item_features, user_biases, item_biases)
     
     # Add true ratings into tuples
     predictions = [prediction + (validation_set[i][2],) 
@@ -620,9 +635,9 @@ def sigmoid_fast(x):
     return 1/(1 + np.exp(-x))
 
 @jit(nopython=True)
-def predict_fast(user, item, user_features, item_features):
+def predict_fast(user, item, user_features, item_features, user_biases, item_biases):
     sig = sigmoid_fast(
-            np.dot(user_features[user, :], item_features[item, :])
+            np.dot(user_features[user, :], item_features[item, :]) + user_biases[user, 0] + item_biases[item, 0]
             )
     sig = np.minimum(sig, 0.9999)
     sig = np.maximum(sig, 0.00001)
@@ -631,7 +646,7 @@ def predict_fast(user, item, user_features, item_features):
     return sig
 
 @jit(nopython=True)
-def predict_pairs_fast(pairs, user_features, item_features):
+def predict_pairs_fast(pairs, user_features, item_features, user_biases, item_biases):
         """Returns a list of predictions of the form (user, item, prediction) 
         for each (user, item) pair in pairs.
         
@@ -642,7 +657,7 @@ def predict_pairs_fast(pairs, user_features, item_features):
             List of (user, item, prediction) tuples."""
         predictions = []
         for user, item in pairs:
-            prediction = predict_fast(user, item, user_features, item_features)
+            prediction = predict_fast(user, item, user_features, item_features, user_biases, item_biases)
             predictions.append((user, item, prediction))
         
         return predictions
