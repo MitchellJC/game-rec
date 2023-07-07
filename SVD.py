@@ -443,23 +443,6 @@ class FastLogisticSVD(SVDBase):
         top = top[:n]
         return top
 
-    def top_n(self, user, n=10):
-        """Return the top n recommendations for given user.
-        
-        Parameters:
-            user (int) - The index of the user
-            n (int) - The number of recommendations to give
-            
-        Preconditions:
-            n > 0"""        
-        prefs = self._M[[user], :]
-        users, items = prefs.nonzero()
-        num_prefs = len(users)
-        prefs = [(items[i], prefs[0, items[i]] - 1) for i in range(num_prefs)]
-        top = self.items_knn(prefs, n=n)
-    
-        return top  
-    
     # def top_n(self, user, n=10):
     #     """Return the top n recommendations for given user.
         
@@ -469,19 +452,36 @@ class FastLogisticSVD(SVDBase):
             
     #     Preconditions:
     #         n > 0"""        
-    #     top = []
-    #     for item in range(self._num_items):
-    #         # Do not add items for which rating already exists
-    #         if user in self._users_rated and item in self._users_rated[user]:
-    #             continue
-                
-    #         predicted_rating = self.predict(user, item)
-            
-    #         top.append((predicted_rating, item))
-    #         top.sort(key=lambda x: x[0], reverse=True)
-    #         top = top[:min(n, len(top))]
+    #     prefs = self._M[[user], :]
+    #     users, items = prefs.nonzero()
+    #     num_prefs = len(users)
+    #     prefs = [(items[i], prefs[0, items[i]] - 1) for i in range(num_prefs)]
+    #     top = self.items_knn(prefs, n=n)
+    
+    #     return top  
+    
+    def top_n(self, user, n=10):
+        """Return the top n recommendations for given user.
         
-    #     return top
+        Parameters:
+            user (int) - The index of the user
+            n (int) - The number of recommendations to give
+            
+        Preconditions:
+            n > 0"""        
+        top = []
+        for item in range(self._num_items):
+            # Do not add items for which rating already exists
+            if user in self._users_rated and item in self._users_rated[user]:
+                continue
+                
+            predicted_rating = self.predict(user, item)
+            
+            top.append((predicted_rating, item))
+            top.sort(key=lambda x: x[0], reverse=True)
+            top = top[:min(n, len(top))]
+        
+        return top
 
     def compute_recall(self, test, k=20):
         tops = {}
@@ -532,8 +532,8 @@ class FastLogisticSVD(SVDBase):
             user_freqs[user, 0] += 1
             item_freqs[item, 0] += 1
 
-        self._user_props = user_freqs/num_samples
-        self._item_props = item_freqs/num_samples
+        self._user_props = ( user_freqs - np.min(user_freqs) )/ (np.max(user_freqs) - np.min(user_freqs))
+        self._item_props = ( item_freqs - np.min(item_freqs) )/ (np.max(item_freqs) - np.min(item_freqs))
     
     def _run_epochs(self, users, items, epochs, early_stop=False):
         self._M = csr_array(self._M)
@@ -601,7 +601,7 @@ def update_fast(i, user, item, values, user_features, item_features, user_biases
                   + user_biases[user, 0] + item_biases[item, 0] )
     )
     ab = a*pred
-    coeff = user_prop[user, 0]*item_prop[item, 0]*learning_rate*( 
+    coeff = (1 - item_prop[item, 0])*learning_rate*( 
         ( -(1 - true)*ab*pred )/(1 - pred) + true*ab 
         )
     
@@ -682,9 +682,9 @@ def compute_val_error_fast(val_errors, validation_set,
 
 @jit(nopython=True)
 def sigmoid_fast(x):
-    if np.isnan(x):
-        print("x is nan!!!!!!!!")
-        raise ValueError()
+    # if x.shape == (1, 1) and np.isnan(x):
+    #     print("x is nan!!!!!!!!")
+    #     raise ValueError()
     return 1/(1 + np.exp(-x))
 
 @jit(nopython=True)
