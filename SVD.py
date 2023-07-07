@@ -328,7 +328,7 @@ class SVDPredictor(SVDBase):
         self._val_errors.append(val_error)
         print("Validation error:", val_error, end="/")
 
-class FastLogisticSVD(LogisticSVD):
+class FastLogisticSVD(SVDBase):
     def fit(self, M, epochs, validation_set=None, tol=1e-15, early_stop=True):
         self._M = M 
         self._M = self._M.tocsr()
