@@ -366,7 +366,7 @@ class FastLogisticSVD(SVDBase):
 
     def predict(self, user, item):
         return predict_fast(user, item, self._user_features, 
-                                  self._item_features)
+                                  self._item_features, self._user_biases, self._item_biases)
     
     def compute_sims(self):
         start_t = time.time()
@@ -559,7 +559,7 @@ def update_fast(i, user, item, values, user_features, item_features, user_biases
     )
 
     new_user_biases = (
-        user_biases[user, 0] + coeff - lrate_C*user_biases[user, 0]
+        user_biases[user, 0] + coeff # - lrate_C*user_biases[user, 0]
     )
     
     if do_items:
@@ -569,7 +569,7 @@ def update_fast(i, user, item, values, user_features, item_features, user_biases
             -lrate_C*item_features[item, :]
         )
         new_item_biases = (
-            item_biases[item, 0] + coeff - lrate_C*item_biases[item, 0]
+            item_biases[item, 0] + coeff # - lrate_C*item_biases[item, 0]
         )
 
         item_features[item, :] = new_item_features
