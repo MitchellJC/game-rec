@@ -193,6 +193,54 @@ class SVDBase():
         del self._M
         del self._mask
 
+    def compute_sims(self):
+        start_t = time.time()
+        q = self._item_features
+        self._sims = lil_array((q.shape[0], q.shape[0]))
+        print("Computing similarities...")
+        for i in range(q.shape[0]):
+            if i % 200 == 0:
+                print("Upto row", i)
+            for j in range(i, q.shape[0]):
+                self._sims[i, j] = cosine_similarity(q[[i], :], q[[j], :])
+        print("Done computing similarities in", time.time() - start_t, "seconds")
+
+    def items_knn(self, subjects, n=10):
+        alpha = 0.1
+        top = []
+        disliked = [(i, pref) for i, pref in subjects if pref == 0]
+        # Get candidates
+        for i, pref in subjects:
+            if pref == 0:
+                continue
+            
+            for j in range(self._sims.shape[0]):
+                if i == j:
+                    continue
+                elif j < i:
+                    sim = self._sims[j, i]
+                elif j > i:
+                    sim = self._sims[i, j]
+
+                # Get min dissimilarity
+                dissims = [1]
+                for k, pref in disliked:
+                    if j == k:
+                        continue
+                    elif j < k:
+                        dissim = 1 - self._sims[j, k]*alpha
+                    elif j > k:
+                        dissim = 1 - self._sims[k, j]*alpha
+
+                    dissims.append(dissim)
+
+                sim *= min(dissims)
+
+                top.append((sim, j))
+                top.sort(reverse=True)
+                top = top[:10*n]
+            return top
+
     def _cache_users_rated(self):
         self._users_rated = {}
         for sample_num in range(self._num_samples):
@@ -409,52 +457,7 @@ class LogisticSVD(SVDBase):
         return predict_fast(user, item, self._user_features, 
                                   self._item_features, self._user_biases, self._item_biases)
     
-    def compute_sims(self):
-        start_t = time.time()
-        q = self._item_features
-        self._sims = lil_array((q.shape[0], q.shape[0]))
-        print("Computing similarities...")
-        for i in range(q.shape[0]):
-            if i % 200 == 0:
-                print("Upto row", i)
-            for j in range(i, q.shape[0]):
-                self._sims[i, j] = cosine_similarity(q[[i], :], q[[j], :])
-        print("Done computing similarities in", time.time() - start_t, "seconds")
     
-    def items_knn(self, subjects, n=10):
-        alpha = 0.1
-        top = []
-        disliked = [(i, pref) for i, pref in subjects if pref == 0]
-        # Get candidates
-        for i, pref in subjects:
-            if pref == 0:
-                continue
-            
-            for j in range(self._sims.shape[0]):
-                if i == j:
-                    continue
-                elif j < i:
-                    sim = self._sims[j, i]
-                elif j > i:
-                    sim = self._sims[i, j]
-
-                # Get min dissimilarity
-                dissims = [1]
-                for k, pref in disliked:
-                    if j == k:
-                        continue
-                    elif j < k:
-                        dissim = 1 - self._sims[j, k]*alpha
-                    elif j > k:
-                        dissim = 1 - self._sims[k, j]*alpha
-
-                    dissims.append(dissim)
-
-                sim *= min(dissims)
-
-                top.append((sim, j))
-                top.sort(reverse=True)
-                top = top[:10*n]
 
         # Filter already seen
         seen = [id for id, pref, in subjects]
