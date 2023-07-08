@@ -203,75 +203,6 @@ class SVDBase():
             self._users_rated[user].append(item)
 
     def _run_epochs(self, users, items, epochs, early_stop=False):
-        for epoch in range(epochs):
-            start_time = time.time()
-            
-            # For all samples in random order update each parameter
-            for i in random.sample(range(self._num_samples), k=self._num_samples):
-                self._update_features(i, users, items)     
-            
-            # Display training information
-            print("Epoch", epoch, end="/")
-            self._compute_error()
-            
-            if self._validation_set:
-                self._compute_val_error()
-                
-            print("Time:", round(time.time() - start_time, 2), "seconds")
-            
-            # Convergence criterion
-            if (self._validation_set 
-                and early_stop 
-                and len(self._val_errors) > 1 
-                and self._val_errors[-2] - self._val_errors[-1] < self._tol
-            ):
-                    print("Small change in validation error. Terminating training.")
-                    return
-            
-    def _cache_user_item_weights(self):
-        user_freqs = np.zeros([self._num_users, 1])
-        item_freqs = np.zeros([self._num_items, 1])
-        users, items = self._M.nonzero()
-        num_samples = len(users)
-
-        for i in range(num_samples):
-            user, item = users[i], items[i]
-
-            user_freqs[user, 0] += 1
-            item_freqs[item, 0] += 1
-
-        self._user_props = ( user_freqs - np.min(user_freqs) )/ (np.max(user_freqs) - np.min(user_freqs))
-        self._item_props = ( item_freqs - np.min(item_freqs) )/ (np.max(item_freqs) - np.min(item_freqs))
-            
-            
-class RatingSVD(SVDBase):
-    """SVD for collaborative filtering, uses explicit ratings."""
-    def fit(self, M, epochs, validation_set=None, tol=1e-15, early_stop=True):
-        self._M = M 
-        self._M = self._M.tocsr()
-        
-        self._validation_set = validation_set
-        self._tol = tol
-        self._train_errors = np.zeros([epochs])
-        if validation_set:
-            self._val_errors = np.zeros([epochs])
-        
-        # Retrieve sample locations
-        self._users, self._items = self._M.nonzero()
-        self._num_samples = len(self._users)
-        self._mask = (self._M != 0)
-
-        self._cache_users_rated()
-        self._cache_user_item_weights()
-
-        self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
-
-    def predict(self, user, item):
-        return predict_fast_rating(user, item, self._user_features, 
-                                  self._item_features, self._user_biases, 
-                                  self._item_biases)
-    
-    def _run_epochs(self, users, items, epochs, early_stop=False):
         self._M = csr_array(self._M)
         for epoch in range(epochs):
             self._epoch += 1
@@ -279,17 +210,10 @@ class RatingSVD(SVDBase):
             
             # For all samples in random order update each parameter
             for i in random.sample(range(self._num_samples), k=self._num_samples):
+                updates = self._update(i, users[i], items[i])
                 (self._user_features, self._item_features, 
-                self._user_biases, self._item_biases) = (
-                    update_fast_rating(i, users[i], items[i], self._M.data, 
-                                self._user_features,
-                                self._item_features,
-                                self._user_biases,
-                                self._item_biases,
-                                self._learning_rate,
-                                self._lrate_C)
-                ) 
-            
+                self._user_biases, self._item_biases) = updates
+                
             # Display training information
             print("Epoch", epoch, end="/")
             loss = self._compute_error()
@@ -309,6 +233,51 @@ class RatingSVD(SVDBase):
             ):
                     print("Small change in validation error. Terminating training.")
                     return
+            
+    def _cache_user_item_weights(self):
+        user_freqs = np.zeros([self._num_users, 1])
+        item_freqs = np.zeros([self._num_items, 1])
+        users, items = self._M.nonzero()
+        num_samples = len(users)
+
+        for i in range(num_samples):
+            user, item = users[i], items[i]
+
+            user_freqs[user, 0] += 1
+            item_freqs[item, 0] += 1
+
+        self._user_props = ( user_freqs - np.min(user_freqs) )/ (
+            np.max(user_freqs) - np.min(user_freqs))
+        self._item_props = ( item_freqs - np.min(item_freqs) )/ (
+            np.max(item_freqs) - np.min(item_freqs))
+            
+            
+class RatingSVD(SVDBase):
+    """SVD for collaborative filtering, uses explicit ratings."""
+    def predict(self, user, item):
+        return predict_fast_rating(user, item, self._user_features, 
+                                  self._item_features, self._user_biases, 
+                                  self._item_biases)
+    
+    def _update(self, i, user, item):
+        return update_fast_rating(i, user, item, self._M.data, 
+                                self._user_features,
+                                self._item_features,
+                                self._user_biases,
+                                self._item_biases,
+                                self._learning_rate,
+                                self._lrate_C)
+    
+    def _compute_error(self):
+        self._M = self._M.tocsr()
+        return compute_rmse_fast(self._M.data, self._M.indices, self._M.indptr, 
+                           self._num_samples, self._train_errors, self._epoch,
+                           self._user_features, self._item_features, self._user_biases, self._item_biases)
+        
+    def _compute_val_error(self):
+        return compute_val_rmse_fast(self._val_errors, List(self._validation_set), 
+                                      self._epoch, self._user_features, 
+                                      self._item_features, self._user_biases, self._item_biases)
     
 # Fast Numba Methods
 ################################################################################
@@ -353,6 +322,53 @@ def update_fast_rating(i, user, item, values, user_features, item_features, user
     user_biases[user, 0] = new_user_biases
 
     return user_features, item_features, user_biases, item_biases
+
+@jit(nopython=True)
+def compute_rmse_fast(values, indices, indptr, num_samples, train_errors, 
+                       epoch, user_features, item_features, user_biases, item_biases):
+    error = 0
+
+    num_vals = 0
+    next_row_index = 0
+    for i in range(len(values)):
+        value = values[i]
+        column = indices[i]
+
+        num_vals += 1
+        if indptr[next_row_index] < num_vals:
+            next_row_index += 1
+
+        true = value - 1
+        pred = predict_fast_rating(next_row_index - 1, column, user_features, item_features, user_biases, item_biases)
+
+        error += (true - pred)**2
+
+    error /= num_samples
+    train_errors[epoch] = error
+
+    return error
+
+@jit(nopython=True)
+def compute_val_rmse_fast(val_errors, validation_set,
+                       epoch, user_features, item_features, user_biases, item_biases):
+   # Predict rating for all pairs in validation
+    predictions = predict_pairs_fast([(user, item) 
+                                for user, item, _ in validation_set], 
+                                user_features, item_features, user_biases, item_biases)
+    
+    # Add true ratings into tuples
+    predictions = [prediction + (validation_set[i][2],) 
+                    for i, prediction in enumerate(predictions)]
+    
+    val_error = 0
+    for user, item, pred, true in predictions:
+        
+        val_error += (true - pred)**2
+
+    val_error /= len(predictions)
+    val_errors[epoch] = val_error
+
+    return val_error
 
 ################################################################################
 
@@ -506,6 +522,15 @@ class LogisticSVD(SVDBase):
         self._recall = recall
         print(recall)
 
+    def _update(self, i, user, item):
+        return update_fast(i, user, item, self._M.data, 
+                            self._user_features,
+                            self._item_features,
+                            self._user_biases,
+                            self._item_biases,
+                            self._learning_rate,
+                            self._lrate_C)
+
     def _cache_users_rated(self):
         self._users_rated = {}
         for sample_num in range(self._num_samples):
@@ -514,45 +539,6 @@ class LogisticSVD(SVDBase):
             if user not in self._users_rated:
                 self._users_rated[user] = []
             self._users_rated[user].append(item)
-    
-    def _run_epochs(self, users, items, epochs, early_stop=False):
-        self._M = csr_array(self._M)
-        for epoch in range(epochs):
-            self._epoch += 1
-            start_time = time.time()
-            
-            # For all samples in random order update each parameter
-            for i in random.sample(range(self._num_samples), k=self._num_samples):
-                (self._user_features, self._item_features, 
-                self._user_biases, self._item_biases) = (
-                    update_fast(i, users[i], items[i], self._M.data, 
-                                self._user_features,
-                                self._item_features,
-                                self._user_biases,
-                                self._item_biases,
-                                self._learning_rate,
-                                self._lrate_C)
-                ) 
-            
-            # Display training information
-            print("Epoch", epoch, end="/")
-            loss = self._compute_error()
-            print("Training error:", loss, end="/")
-
-            if self._validation_set:
-                val_loss = self._compute_val_error()
-                print("Validation error:", val_loss, end="/")
-                
-            print("Time:", round(time.time() - start_time, 2), "seconds")
-            
-            # Convergence criterion
-            if (self._validation_set 
-                and early_stop 
-                and epoch > 1 
-                and self._val_errors[-2] - self._val_errors[-1] < self._tol
-            ):
-                    print("Small change in validation error. Terminating training.")
-                    return
 
     def _compute_error(self):
         self._M = self._M.tocsr()
