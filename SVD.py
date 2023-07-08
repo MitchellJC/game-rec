@@ -217,11 +217,11 @@ class SVDBase():
             # Display training information
             print("Epoch", epoch, end="/")
             loss = self._compute_error()
-            print("Training error:", loss, end="/")
+            print("Training loss:", loss, end="/")
 
             if self._validation_set:
                 val_loss = self._compute_val_error()
-                print("Validation error:", val_loss, end="/")
+                print("Validation loss:", val_loss, end="/")
                 
             print("Time:", round(time.time() - start_time, 2), "seconds")
             
@@ -287,6 +287,23 @@ def predict_fast_rating(user, item, user_features, item_features, user_biases, i
             + user_biases[user, 0] + item_biases[item, 0])
 
 @jit(nopython=True)
+def predict_pairs_fast_rating(pairs, user_features, item_features, user_biases, item_biases):
+        """Returns a list of predictions of the form (user, item, prediction) 
+        for each (user, item) pair in pairs.
+        
+        Parameters:
+            pairs (list) - List of (user, item) tuples.
+            
+        Returns:
+            List of (user, item, prediction) tuples."""
+        predictions = []
+        for user, item in pairs:
+            prediction = predict_fast_rating(user, item, user_features, item_features, user_biases, item_biases)
+            predictions.append((user, item, prediction))
+        
+        return predictions
+
+@jit(nopython=True)
 def update_fast_rating(i, user, item, values, user_features, item_features, user_biases, 
                 item_biases, learning_rate, lrate_C, do_items=True):
     # Pre-cache computations
@@ -344,6 +361,7 @@ def compute_rmse_fast(values, indices, indptr, num_samples, train_errors,
         error += (true - pred)**2
 
     error /= num_samples
+    error = np.sqrt(error)
     train_errors[epoch] = error
 
     return error
@@ -352,7 +370,7 @@ def compute_rmse_fast(values, indices, indptr, num_samples, train_errors,
 def compute_val_rmse_fast(val_errors, validation_set,
                        epoch, user_features, item_features, user_biases, item_biases):
    # Predict rating for all pairs in validation
-    predictions = predict_pairs_fast([(user, item) 
+    predictions = predict_pairs_fast_rating([(user, item) 
                                 for user, item, _ in validation_set], 
                                 user_features, item_features, user_biases, item_biases)
     
@@ -366,6 +384,7 @@ def compute_val_rmse_fast(val_errors, validation_set,
         val_error += (true - pred)**2
 
     val_error /= len(predictions)
+    val_error = np.sqrt(val_error)
     val_errors[epoch] = val_error
 
     return val_error
