@@ -58,22 +58,14 @@ class SVDBase():
         self._epoch = -1
 
     def fit(self, M, epochs, validation_set=None, tol=1e-15, early_stop=True):
-        """Fit the model with the given utility matrix M (csr array).
-        
-        Parameters:
-            M (scipy csr_array) - UxI array where U is the number of users
-                and I is the number of items
-            epochs (int) - The number of epochs
-            validation_set (list) - List of validation pairs
-            tol (float) - Early stopping tolerance
-            early_stop (bool) - True to enable automatic early stopping"""
         self._M = M 
+        self._M = self._M.tocsr()
         
         self._validation_set = validation_set
         self._tol = tol
-        self._train_errors = []
+        self._train_errors = np.zeros([epochs])
         if validation_set:
-            self._val_errors = []
+            self._val_errors = np.zeros([epochs])
         
         # Retrieve sample locations
         self._users, self._items = self._M.nonzero()
@@ -81,6 +73,7 @@ class SVDBase():
         self._mask = (self._M != 0)
 
         self._cache_users_rated()
+        self._cache_user_item_weights()
 
         self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
 
@@ -208,45 +201,47 @@ class SVDBase():
             if user not in self._users_rated:
                 self._users_rated[user] = []
             self._users_rated[user].append(item)
-            
+
     def _run_epochs(self, users, items, epochs, early_stop=False):
-        self._M = csr_array(self._M)
         for epoch in range(epochs):
-            self._epoch += 1
             start_time = time.time()
             
             # For all samples in random order update each parameter
             for i in random.sample(range(self._num_samples), k=self._num_samples):
-                (self._user_features, self._item_features, 
-                self._user_biases, self._item_biases) = (
-                    update_fast(i, users[i], items[i], self._M.data, 
-                                self._user_features,
-                                self._item_features,
-                                self._user_biases,
-                                self._item_biases,
-                                self._learning_rate,
-                                self._lrate_C)
-                ) 
+                self._update_features(i, users, items)     
             
             # Display training information
             print("Epoch", epoch, end="/")
-            loss = self._compute_error()
-            print("Training error:", loss, end="/")
-
+            self._compute_error()
+            
             if self._validation_set:
-                val_loss = self._compute_val_error()
-                print("Validation error:", val_loss, end="/")
+                self._compute_val_error()
                 
             print("Time:", round(time.time() - start_time, 2), "seconds")
             
             # Convergence criterion
             if (self._validation_set 
                 and early_stop 
-                and epoch > 1 
+                and len(self._val_errors) > 1 
                 and self._val_errors[-2] - self._val_errors[-1] < self._tol
             ):
                     print("Small change in validation error. Terminating training.")
                     return
+            
+    def _cache_user_item_weights(self):
+        user_freqs = np.zeros([self._num_users, 1])
+        item_freqs = np.zeros([self._num_items, 1])
+        users, items = self._M.nonzero()
+        num_samples = len(users)
+
+        for i in range(num_samples):
+            user, item = users[i], items[i]
+
+            user_freqs[user, 0] += 1
+            item_freqs[item, 0] += 1
+
+        self._user_props = ( user_freqs - np.min(user_freqs) )/ (np.max(user_freqs) - np.min(user_freqs))
+        self._item_props = ( item_freqs - np.min(item_freqs) )/ (np.max(item_freqs) - np.min(item_freqs))
             
             
 class RatingSVD(SVDBase):
@@ -276,6 +271,45 @@ class RatingSVD(SVDBase):
                                   self._item_features, self._user_biases, 
                                   self._item_biases)
     
+    def _run_epochs(self, users, items, epochs, early_stop=False):
+        self._M = csr_array(self._M)
+        for epoch in range(epochs):
+            self._epoch += 1
+            start_time = time.time()
+            
+            # For all samples in random order update each parameter
+            for i in random.sample(range(self._num_samples), k=self._num_samples):
+                (self._user_features, self._item_features, 
+                self._user_biases, self._item_biases) = (
+                    update_fast_rating(i, users[i], items[i], self._M.data, 
+                                self._user_features,
+                                self._item_features,
+                                self._user_biases,
+                                self._item_biases,
+                                self._learning_rate,
+                                self._lrate_C)
+                ) 
+            
+            # Display training information
+            print("Epoch", epoch, end="/")
+            loss = self._compute_error()
+            print("Training error:", loss, end="/")
+
+            if self._validation_set:
+                val_loss = self._compute_val_error()
+                print("Validation error:", val_loss, end="/")
+                
+            print("Time:", round(time.time() - start_time, 2), "seconds")
+            
+            # Convergence criterion
+            if (self._validation_set 
+                and early_stop 
+                and epoch > 1 
+                and self._val_errors[-2] - self._val_errors[-1] < self._tol
+            ):
+                    print("Small change in validation error. Terminating training.")
+                    return
+    
 # Fast Numba Methods
 ################################################################################
 @jit(nopython=True)
@@ -283,29 +317,46 @@ def predict_fast_rating(user, item, user_features, item_features, user_biases, i
     return (np.dot(user_features[user, :], item_features[item, :]) 
             + user_biases[user, 0] + item_biases[item, 0])
 
+@jit(nopython=True)
+def update_fast_rating(i, user, item, values, user_features, item_features, user_biases, 
+                item_biases, learning_rate, lrate_C, do_items=True):
+    # Pre-cache computations
+    true = values[i] - 1
+    pred = predict_fast_rating(user, item, user_features, 
+                        item_features, user_biases, item_biases)
+    err = learning_rate*(true - pred)
+    
+    # Compute user features update
+    new_user_features = (
+        user_features[user, :] + item_features[item, :]*err
+        -lrate_C*user_features[user, :]
+    )
+
+    new_user_biases = (
+        user_biases[user, 0] + err # - lrate_C*user_biases[user, 0]
+    )
+    
+    if do_items:
+        # Compute item features update
+        new_item_features = (
+            item_features[item, :] + user_features[user, :]*err
+            -lrate_C*item_features[item, :]
+        )
+        new_item_biases = (
+            item_biases[item, 0] + err # - lrate_C*item_biases[item, 0]
+        )
+
+        item_features[item, :] = new_item_features
+        item_biases[item, 0] = new_item_biases
+
+    user_features[user, :] = new_user_features
+    user_biases[user, 0] = new_user_biases
+
+    return user_features, item_features, user_biases, item_biases
+
 ################################################################################
 
 class LogisticSVD(SVDBase):
-    def fit(self, M, epochs, validation_set=None, tol=1e-15, early_stop=True):
-        self._M = M 
-        self._M = self._M.tocsr()
-        
-        self._validation_set = validation_set
-        self._tol = tol
-        self._train_errors = np.zeros([epochs])
-        if validation_set:
-            self._val_errors = np.zeros([epochs])
-        
-        # Retrieve sample locations
-        self._users, self._items = self._M.nonzero()
-        self._num_samples = len(self._users)
-        self._mask = (self._M != 0)
-
-        self._cache_users_rated()
-        self._cache_user_item_weights()
-
-        self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
-
     def continue_fit(self, epochs, early_stop=True):
         """Continue training for extra epochs"""      
         new_train_errors = np.zeros([self._train_errors.shape[0] + epochs])
@@ -463,23 +514,45 @@ class LogisticSVD(SVDBase):
             if user not in self._users_rated:
                 self._users_rated[user] = []
             self._users_rated[user].append(item)
-
-    def _cache_user_item_weights(self):
-        user_freqs = np.zeros([self._num_users, 1])
-        item_freqs = np.zeros([self._num_items, 1])
-        users, items = self._M.nonzero()
-        num_samples = len(users)
-
-        for i in range(num_samples):
-            user, item = users[i], items[i]
-
-            user_freqs[user, 0] += 1
-            item_freqs[item, 0] += 1
-
-        self._user_props = ( user_freqs - np.min(user_freqs) )/ (np.max(user_freqs) - np.min(user_freqs))
-        self._item_props = ( item_freqs - np.min(item_freqs) )/ (np.max(item_freqs) - np.min(item_freqs))
     
-    
+    def _run_epochs(self, users, items, epochs, early_stop=False):
+        self._M = csr_array(self._M)
+        for epoch in range(epochs):
+            self._epoch += 1
+            start_time = time.time()
+            
+            # For all samples in random order update each parameter
+            for i in random.sample(range(self._num_samples), k=self._num_samples):
+                (self._user_features, self._item_features, 
+                self._user_biases, self._item_biases) = (
+                    update_fast(i, users[i], items[i], self._M.data, 
+                                self._user_features,
+                                self._item_features,
+                                self._user_biases,
+                                self._item_biases,
+                                self._learning_rate,
+                                self._lrate_C)
+                ) 
+            
+            # Display training information
+            print("Epoch", epoch, end="/")
+            loss = self._compute_error()
+            print("Training error:", loss, end="/")
+
+            if self._validation_set:
+                val_loss = self._compute_val_error()
+                print("Validation error:", val_loss, end="/")
+                
+            print("Time:", round(time.time() - start_time, 2), "seconds")
+            
+            # Convergence criterion
+            if (self._validation_set 
+                and early_stop 
+                and epoch > 1 
+                and self._val_errors[-2] - self._val_errors[-1] < self._tol
+            ):
+                    print("Small change in validation error. Terminating training.")
+                    return
 
     def _compute_error(self):
         self._M = self._M.tocsr()
