@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import random
+import multiprocessing as mp
 from scipy.sparse import csr_array, lil_array
 
 class RecData:
@@ -51,7 +52,7 @@ class RecData:
         self._num_users = len(self._users)
         self._num_items = len(self._items)
                 
-    def leave_k_out_split(self, k=1):
+    def leave_k_out_split(self, k=1, create_val=False):
         """Generate a leave-k-out split, creates both a validation split and 
         a test split. That is, 2*k data points will be left out.
         
@@ -63,8 +64,8 @@ class RecData:
         val = []
         test = []
         for user in range(self._M.shape[0]):
-            if user % 1e6 == 0:
-                print("Done user", user)
+            if user % 1e4 == 0:
+                print("Done user", user + 1, "/", self._M.shape[0])
             
             # Val holdout
             possible_indices = self._M[[user], :].nonzero()[1]
@@ -74,8 +75,9 @@ class RecData:
                     M_prime[user, item] = 0
                     val.append((user, item, self._M[user, item] - 1))
             
+            
             # Test holdout
-            if len(possible_indices) > 2*k:
+            if len(possible_indices) > 2*k and create_val:
                 possible_indices = [index for index in possible_indices 
                                 if index not in left_out]
                 left_out = np.random.choice(possible_indices, k, replace=False)
@@ -87,7 +89,11 @@ class RecData:
         train_data.__dict__.update(self.__dict__)
         train_data._M = M_prime
         
-        return train_data, val, test
+        if create_val:
+            return train_data, val, test
+        else:
+            return train_data, val
+        
     
     def train_test_split(self, test_size=0.2):
         """Generate a train test split.
