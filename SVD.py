@@ -200,7 +200,7 @@ class SVDBase():
         print("Computing similarities...")
         for i in range(q.shape[0]):
             if i % 200 == 0:
-                print("Upto row", i)
+                print("Upto row", i + 1, "/", q.shape[0])
             for j in range(i, q.shape[0]):
                 self._sims[i, j] = cosine_similarity(q[[i], :], q[[j], :])
         print("Done computing similarities in", time.time() - start_t, "seconds")
