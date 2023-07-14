@@ -224,7 +224,7 @@ class SVDBase():
                 continue
             
             for j in range(self._sims.shape[0]):
-                if i == j:
+                if i == j or j in seen:
                     continue
                 elif j < i:
                     sim = self._sims[j, i]
@@ -245,23 +245,13 @@ class SVDBase():
 
                 sim -= min(dissims)
 
+                seen.append(j)
                 top.append((sim, j))
                 top.sort(reverse=True)
                 top = top[:10*n]
-        
-        # Remove items user has indicated with prefs
-        top = [(sim, j) for sim, j in top if j not in seen]
-
-        # Remove duplicates in top list
-        dup_seen = []
-        new_top = []
-        for sim, j in top:
-            if j not in dup_seen:
-                dup_seen.append(j)
-                new_top.append((sim, j))
-        top = new_top
-        
+            
         top = top[:n]
+
         return top
 
     def _cache_users_rated(self):
