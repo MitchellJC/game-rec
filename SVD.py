@@ -78,7 +78,15 @@ class SVDBase():
         self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
 
     def continue_fit(self, epochs, early_stop=True):
-        """Continue training for extra epochs"""          
+        """Continue training for extra epochs"""      
+        new_train_errors = np.zeros([self._train_errors.shape[0] + epochs])
+        new_val_errors = np.zeros([self._train_errors.shape[0] + epochs])   
+
+        new_train_errors[:self._train_errors.shape[0]] = self._train_errors
+        new_val_errors[:self._val_errors.shape[0]] = self._val_errors
+
+        self._train_errors = new_train_errors
+        self._val_errors = new_val_errors
         self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
 
     def partial_fit(self, new_sample, epochs, batch_size=0, compute_err=False):
@@ -206,8 +214,9 @@ class SVDBase():
         print("Done computing similarities in", time.time() - start_t, "seconds")
 
     def items_knn(self, subjects, n=10):
-        alpha = 0.1
+        alpha = 1
         top = []
+        seen = [i for i, _ in subjects]
         disliked = [(i, pref) for i, pref in subjects if pref == 0]
         # Get candidates
         for i, pref in subjects:
@@ -223,7 +232,7 @@ class SVDBase():
                     sim = self._sims[i, j]
 
                 # Get min dissimilarity
-                dissims = [1]
+                dissims = [0]
                 for k, pref in disliked:
                     if j == k:
                         continue
@@ -234,12 +243,16 @@ class SVDBase():
 
                     dissims.append(dissim)
 
-                sim *= min(dissims)
+                sim -= min(dissims)
 
                 top.append((sim, j))
                 top.sort(reverse=True)
                 top = top[:10*n]
-            return top
+        
+        top = [(sim, j) for sim, j in top if j not in seen]
+        top = top[:n]
+
+        return top
 
     def _cache_users_rated(self):
         self._users_rated = {}
@@ -441,58 +454,9 @@ def compute_val_rmse_fast(val_errors, validation_set,
 ################################################################################
 
 class LogisticSVD(SVDBase):
-    def continue_fit(self, epochs, early_stop=True):
-        """Continue training for extra epochs"""      
-        new_train_errors = np.zeros([self._train_errors.shape[0] + epochs])
-        new_val_errors = np.zeros([self._train_errors.shape[0] + epochs])   
-
-        new_train_errors[:self._train_errors.shape[0]] = self._train_errors
-        new_val_errors[:self._val_errors.shape[0]] = self._val_errors
-
-        self._train_errors = new_train_errors
-        self._val_errors = new_val_errors
-        self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
-
     def predict(self, user, item):
         return predict_fast(user, item, self._user_features, 
-                                  self._item_features, self._user_biases, self._item_biases)
-    
-    
-
-        # Filter already seen
-        seen = [id for id, pref, in subjects]
-        top = [cand for cand in top if cand[1] not in seen]
-
-        # Filter duplicates
-        new_top = []
-        seen = []
-        for score, id in top:
-            if id in seen:
-                continue
-
-            seen.append(id)
-            new_top.append((score, id))
-        top = new_top
-
-        top = top[:n]
-        return top
-
-    # def top_n(self, user, n=10):
-    #     """Return the top n recommendations for given user.
-        
-    #     Parameters:
-    #         user (int) - The index of the user
-    #         n (int) - The number of recommendations to give
-            
-    #     Preconditions:
-    #         n > 0"""        
-    #     prefs = self._M[[user], :]
-    #     users, items = prefs.nonzero()
-    #     num_prefs = len(users)
-    #     prefs = [(items[i], prefs[0, items[i]] - 1) for i in range(num_prefs)]
-    #     top = self.items_knn(prefs, n=n)
-    
-    #     return top  
+                                  self._item_features, self._user_biases, self._item_biases)  
     
     def top_n(self, user, n=10):
         """Return the top n recommendations for given user.
