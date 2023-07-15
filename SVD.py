@@ -42,6 +42,7 @@ class SVDBase():
         self._C = C
         self._lrate_C = self._learning_rate*self._C
         
+        self._mu = 0
         self._user_features = np.array(np.random.normal(size=(self._num_users, self._k), 
                                                scale=0.01), dtype=np.float64)
         self._item_features = np.array(np.random.normal(size=(self._num_items, self._k), 
@@ -60,6 +61,7 @@ class SVDBase():
     def fit(self, M, epochs, validation_set=None, tol=1e-15, early_stop=True):
         self._M = M 
         self._M = self._M.tocsr()
+        self._mu = self._M.sum() / len(self._M.nonzero()[0])
         
         self._validation_set = validation_set
         self._tol = tol
@@ -98,6 +100,7 @@ class SVDBase():
             epochs (int) - The number of epochs
             batch_size (int) - The number of users to mix-in for training
             compute_err (bool) - True to enable training error computation"""
+        print("Warning in development.")
         self._num_users += 1
         self._M = csr_array(vstack([lil_array(self._M), new_sample]))
         total_users, total_items = self._M.nonzero()
@@ -125,13 +128,7 @@ class SVDBase():
             for i in random.sample(possible_indices , k=len(possible_indices)):
                 (self._user_features, self._item_features,
                  self._user_biases, self._item_biases) = (
-                    update_fast(i, total_users[i], total_items[i], self._M.data, 
-                                self._user_features,
-                                self._item_features,
-                                self._user_biases,
-                                self._item_biases,
-                                self._learning_rate,
-                                self._lrate_C)
+                    self._update(i, total_users[i], total_items[i])
                 ) 
             
             print("Epoch", epoch, end="/")
@@ -272,6 +269,7 @@ class SVDBase():
             # For all samples in random order update each parameter
             for i in random.sample(range(self._num_samples), k=self._num_samples):
                 updates = self._update(i, users[i], items[i])
+
                 (self._user_features, self._item_features, 
                 self._user_biases, self._item_biases) = updates
                 
@@ -316,12 +314,13 @@ class SVDBase():
 class RatingSVD(SVDBase):
     """SVD for collaborative filtering, uses explicit ratings."""
     def predict(self, user, item):
-        return predict_fast_rating(user, item, self._user_features, 
+        return predict_fast_rating(user, item, self._mu, self._user_features, 
                                   self._item_features, self._user_biases, 
                                   self._item_biases)
     
     def _update(self, i, user, item):
         return update_fast_rating(i, user, item, self._M.data, 
+                                self._mu,
                                 self._user_features,
                                 self._item_features,
                                 self._user_biases,
@@ -333,23 +332,23 @@ class RatingSVD(SVDBase):
     def _compute_error(self):
         self._M = self._M.tocsr()
         return compute_rmse_fast(self._M.data, self._M.indices, self._M.indptr, 
-                           self._num_samples, self._train_errors, self._epoch,
+                           self._num_samples, self._train_errors, self._epoch, self._mu,
                            self._user_features, self._item_features, self._user_biases, self._item_biases)
         
     def _compute_val_error(self):
         return compute_val_rmse_fast(self._val_errors, List(self._validation_set), 
-                                      self._epoch, self._user_features, 
+                                      self._epoch, self._mu, self._user_features, 
                                       self._item_features, self._user_biases, self._item_biases)
     
 # Fast Numba Methods
 ################################################################################
 @jit(nopython=True)
-def predict_fast_rating(user, item, user_features, item_features, user_biases, item_biases):
+def predict_fast_rating(user, item, mu, user_features, item_features, user_biases, item_biases):
     return (np.dot(user_features[user, :], item_features[item, :]) 
-            + user_biases[user, 0] + item_biases[item, 0])
+            + user_biases[user, 0] + item_biases[item, 0] + mu)
 
 @jit(nopython=True)
-def predict_pairs_fast_rating(pairs, user_features, item_features, user_biases, item_biases):
+def predict_pairs_fast_rating(pairs, mu, user_features, item_features, user_biases, item_biases):
         """Returns a list of predictions of the form (user, item, prediction) 
         for each (user, item) pair in pairs.
         
@@ -360,17 +359,18 @@ def predict_pairs_fast_rating(pairs, user_features, item_features, user_biases, 
             List of (user, item, prediction) tuples."""
         predictions = []
         for user, item in pairs:
-            prediction = predict_fast_rating(user, item, user_features, item_features, user_biases, item_biases)
+            prediction = predict_fast_rating(user, item, mu, user_features, 
+                                            item_features, user_biases, item_biases)
             predictions.append((user, item, prediction))
         
         return predictions
 
 @jit(nopython=True)
-def update_fast_rating(i, user, item, values, user_features, item_features, user_biases, 
+def update_fast_rating(i, user, item, values, mu, user_features, item_features, user_biases, 
                 item_biases, item_penalty, learning_rate, lrate_C, do_items=True):
     # Pre-cache computations
     true = values[i] - 1
-    pred = predict_fast_rating(user, item, user_features, 
+    pred = predict_fast_rating(user, item, mu, user_features, 
                         item_features, user_biases, item_biases)
     err = item_penalty[item, 0]*learning_rate*(true - pred)
     
@@ -404,7 +404,7 @@ def update_fast_rating(i, user, item, values, user_features, item_features, user
 
 @jit(nopython=True)
 def compute_rmse_fast(values, indices, indptr, num_samples, train_errors, 
-                       epoch, user_features, item_features, user_biases, item_biases):
+                       epoch, mu, user_features, item_features, user_biases, item_biases):
     error = 0
 
     num_vals = 0
@@ -418,7 +418,8 @@ def compute_rmse_fast(values, indices, indptr, num_samples, train_errors,
             next_row_index += 1
 
         true = value - 1
-        pred = predict_fast_rating(next_row_index - 1, column, user_features, item_features, user_biases, item_biases)
+        pred = predict_fast_rating(next_row_index - 1, column, mu, user_features, 
+                                   item_features, user_biases, item_biases)
 
         error += (true - pred)**2
 
@@ -430,11 +431,11 @@ def compute_rmse_fast(values, indices, indptr, num_samples, train_errors,
 
 @jit(nopython=True)
 def compute_val_rmse_fast(val_errors, validation_set,
-                       epoch, user_features, item_features, user_biases, item_biases):
+                       epoch, mu, user_features, item_features, user_biases, item_biases):
    # Predict rating for all pairs in validation
     predictions = predict_pairs_fast_rating([(user, item) 
                                 for user, item, _ in validation_set], 
-                                user_features, item_features, user_biases, item_biases)
+                                mu, user_features, item_features, user_biases, item_biases)
     
     # Add true ratings into tuples
     predictions = [prediction + (validation_set[i][2],) 
@@ -450,7 +451,6 @@ def compute_val_rmse_fast(val_errors, validation_set,
     val_errors[epoch] = val_error
 
     return val_error
-
 ################################################################################
 
 class LogisticSVD(SVDBase):
