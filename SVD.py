@@ -61,7 +61,7 @@ class SVDBase():
     def fit(self, M, epochs, validation_set=None, tol=1e-15, early_stop=True):
         self._M = M 
         self._M = self._M.tocsr()
-        self._mu = self._M.sum() / len(self._M.nonzero()[0])
+        self._mu = self._M.sum() / len(self._M.nonzero()[0]) - 1
         
         self._validation_set = validation_set
         self._tol = tol
@@ -142,7 +142,7 @@ class SVDBase():
         self._M = self._M[:-1, :]        
         self._user_features = self._user_features[:-1, :]
 
-    def top_n(self, user, n=10):
+    def top_n(self, user, n=10, remove_bias=False):
         """Return the top n recommendations for given user.
         
         Parameters:
@@ -158,6 +158,8 @@ class SVDBase():
                 continue
                 
             predicted_rating = self.predict(user, item)
+            if remove_bias:
+                predicted_rating -= self._item_biases[item, 0]
             
             top.append((predicted_rating, item))
             top.sort(key=lambda x: x[0], reverse=True)
@@ -372,7 +374,7 @@ def update_fast_rating(i, user, item, values, mu, user_features, item_features, 
     true = values[i] - 1
     pred = predict_fast_rating(user, item, mu, user_features, 
                         item_features, user_biases, item_biases)
-    err = item_penalty[item, 0]*learning_rate*(true - pred)
+    err = learning_rate*(true - pred) # TODO Figure out what to do with item penalty.
     
     # Compute user features update
     new_user_features = (
