@@ -307,10 +307,10 @@ class SVDBase():
             user_freqs[user, 0] += 1
             item_freqs[item, 0] += 1
 
-        self._item_penalty = 1 - ( user_freqs - np.min(user_freqs) )/ (
-            np.max(user_freqs) - np.min(user_freqs))
-        self._user_penalty = 1 - ( item_freqs - np.min(item_freqs) )/ (
+        self._item_penalty = 1 - ( item_freqs - np.min(item_freqs) )/ (
             np.max(item_freqs) - np.min(item_freqs))
+        self._user_penalty = 1 - ( user_freqs - np.min(user_freqs) )/ (
+            np.max(user_freqs) - np.min(user_freqs))
             
             
 class RatingSVD(SVDBase):
@@ -327,6 +327,7 @@ class RatingSVD(SVDBase):
                                 self._item_features,
                                 self._user_biases,
                                 self._item_biases,
+                                self._user_penalty,
                                 self._item_penalty,
                                 self._learning_rate,
                                 self._lrate_C)
@@ -369,12 +370,14 @@ def predict_pairs_fast_rating(pairs, mu, user_features, item_features, user_bias
 
 @jit(nopython=True)
 def update_fast_rating(i, user, item, values, mu, user_features, item_features, user_biases, 
-                item_biases, item_penalty, learning_rate, lrate_C, do_items=True):
+                item_biases, user_penalty, item_penalty, learning_rate, lrate_C, do_items=True):
     # Pre-cache computations
     true = values[i] - 1
     pred = predict_fast_rating(user, item, mu, user_features, 
                         item_features, user_biases, item_biases)
-    err = learning_rate*(true - pred) # TODO Figure out what to do with item penalty.
+    if np.isnan(user_penalty[user, 0]):
+        raise ValueError(f"Nan for user {user}")
+    err = user_penalty[user, 0]*item_penalty[item, 0]*learning_rate*(true - pred) # TODO Figure out what to do with item penalty.
     
     # Compute user features update
     new_user_features = (
@@ -393,7 +396,7 @@ def update_fast_rating(i, user, item, values, mu, user_features, item_features, 
             -lrate_C*item_features[item, :]
         )
         new_item_biases = (
-            item_biases[item, 0] + err  - lrate_C*item_biases[item, 0]
+            item_biases[item, 0] + err  - 30*lrate_C*item_biases[item, 0]
         )
 
         item_features[item, :] = new_item_features
