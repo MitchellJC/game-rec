@@ -212,43 +212,75 @@ class SVDBase():
                 self._sims[i, j] = cosine_similarity(q[[i], :], q[[j], :])
         print("Done computing similarities in", time.time() - start_t, "seconds")
 
+    # def items_knn(self, subjects, n=10):
+    #     alpha = 1
+    #     top = []
+    #     seen = [i for i, _ in subjects]
+    #     disliked = [(i, pref) for i, pref in subjects if pref == 0]
+    #     # Get candidates
+    #     for i, pref in subjects:
+    #         if pref == 0:
+    #             continue
+            
+    #         for j in range(self._sims.shape[0]):
+    #             if i == j or j in seen:
+    #                 continue
+    #             elif j < i:
+    #                 sim = self._sims[j, i]
+    #             elif j > i:
+    #                 sim = self._sims[i, j]
+
+    #             # Get min dissimilarity
+    #             dissims = [0]
+    #             for k, pref in disliked:
+    #                 if j == k:
+    #                     continue
+    #                 elif j < k:
+    #                     dissim = 1 - self._sims[j, k]*alpha
+    #                 elif j > k:
+    #                     dissim = 1 - self._sims[k, j]*alpha
+
+    #                 dissims.append(dissim)
+
+    #             sim -= min(dissims)
+
+    #             seen.append(j)
+    #             top.append((sim, j))
+    #             top.sort(reverse=True)
+    #             top = top[:10*n]
+            
+    #     top = top[:n]
+
+    #     return top
     def items_knn(self, subjects, n=10):
-        alpha = 1
-        top = []
-        seen = [i for i, _ in subjects]
-        disliked = [(i, pref) for i, pref in subjects if pref == 0]
-        # Get candidates
-        for i, pref in subjects:
-            if pref == 0:
-                continue
-            
-            for j in range(self._sims.shape[0]):
-                if i == j or j in seen:
-                    continue
-                elif j < i:
+        k = 10
+        for i in range(self._num_items):
+            # Get neighbours
+            neighbs = []
+            for j, pref in subjects:
+                if j < i:
                     sim = self._sims[j, i]
-                elif j > i:
+                elif j >= i:
                     sim = self._sims[i, j]
+                neighbs.append((sim, pref, j))
 
-                # Get min dissimilarity
-                dissims = [0]
-                for k, pref in disliked:
-                    if j == k:
-                        continue
-                    elif j < k:
-                        dissim = 1 - self._sims[j, k]*alpha
-                    elif j > k:
-                        dissim = 1 - self._sims[k, j]*alpha
+            neighbs.sort(key=lambda x: x[0], reverse=True)
+            neighbs = neighbs[:k]
 
-                    dissims.append(dissim)
+            top = []
+            # Compute rating
+            a = 0
+            b = 0
+            for sim, pref, j in neighbs:
+                r = pref
+                a += sim*r
+                b += np.abs(sim)
 
-                sim -= min(dissims)
+            pred = a/b if b != 0 else -2
+            top.append((pred, i))
 
-                seen.append(j)
-                top.append((sim, j))
-                top.sort(reverse=True)
-                top = top[:10*n]
-            
+        top = [(pred, i) for pred, i in top if i not in [j for j, pref in subjects]]
+        top.sort(key=lambda x: x[0], reverse=True)
         top = top[:n]
 
         return top
