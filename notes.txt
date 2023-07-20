@@ -1,3 +1,0 @@
-# Recalls
-svd with just collab filtering (pruned data),  0.0363951563362244
-svd with item-based knn (pruned data), 
