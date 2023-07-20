@@ -28,7 +28,7 @@ class Metrics:
 class SVDBase():
     """Base class for funk svd"""
     def __init__(self, num_users, num_items, num_ratings, k=10, learning_rate=0.01,
-                  C=0.02):
+                 C=0.02):
         """Initialise new SVDBase.
         
         Parameters:
@@ -49,14 +49,14 @@ class SVDBase():
         self._lrate_C = self._learning_rate*self._C
         
         self._mu = 0
-        self._user_features = np.array(np.random.normal(size=(self._num_users, self._k), 
-                                               scale=0.01), dtype=np.float64)
-        self._item_features = np.array(np.random.normal(size=(self._num_items, self._k), 
-                                               scale=0.01), dtype=np.float64)
-        self._user_biases = np.array(np.random.normal(size=(self._num_users, 1), 
-                                               scale=0.01), dtype=np.float64)
-        self._item_biases = np.array(np.random.normal(size=(self._num_items, 1), 
-                                               scale=0.01), dtype=np.float64)
+        rand = np.random.normal(size=(self._num_users, self._k), scale=0.01)
+        self._user_features = np.array(rand, dtype=np.float64)
+        rand = np.random.normal(size=(self._num_items, self._k), scale=0.01)
+        self._item_features = np.array(rand, dtype=np.float64)
+        rand = np.random.normal(size=(self._num_users, 1), scale=0.01)
+        self._user_biases = np.array(rand, dtype=np.float64)
+        rand = np.random.normal(size=(self._num_items, 1), scale=0.01)
+        self._item_biases = np.array(rand, dtype=np.float64)
         
         self._M = None
         self._num_samples = None
@@ -342,8 +342,8 @@ class SVDBase():
                 and epoch > 1 
                 and self._val_errors[-2] - self._val_errors[-1] < self._tol
             ):
-                    print("Small change in validation error. Terminating training.")
-                    return
+                print("Small change in validation error. Terminating training.")
+                return
             
     def _cache_user_item_weights(self):
         """Cache weights for users and items depending on their popularity."""
@@ -643,8 +643,8 @@ def compute_val_rmse_fast(val_errors, validation_set, epoch, mu, user_features,
 
 class LogisticSVD(SVDBase):
     def predict(self, user, item):
-        return predict_fast(user, item, self._user_features, 
-                                  self._item_features, self._user_biases, self._item_biases)  
+        return predict_fast(user, item, self._user_features, self._item_features, 
+                            self._user_biases, self._item_biases)  
     
     def top_n(self, user, n=10):
         """Return the top n recommendations for given user.
@@ -698,13 +698,9 @@ class LogisticSVD(SVDBase):
         print(recall)
 
     def _update(self, i, user, item):
-        return update_fast(i, user, item, self._M.data, 
-                            self._user_features,
-                            self._item_features,
-                            self._user_biases,
-                            self._item_biases,
-                            self._learning_rate,
-                            self._lrate_C)
+        return update_fast(i, user, item, self._M.data, self._user_features,
+                           self._item_features, self._user_biases, 
+                           self._item_biases, self._learning_rate, self._lrate_C)
 
     def _cache_users_rated(self):
         self._users_rated = {}
@@ -718,13 +714,17 @@ class LogisticSVD(SVDBase):
     def _compute_error(self):
         self._M = self._M.tocsr()
         return compute_error_fast(self._M.data, self._M.indices, self._M.indptr, 
-                           self._num_samples, self._train_errors, self._epoch,
-                           self._user_features, self._item_features, self._user_biases, self._item_biases)
+                                  self._num_samples, self._train_errors, 
+                                  self._epoch, self._user_features, 
+                                  self._item_features, self._user_biases, 
+                                  self._item_biases)
         
     def _compute_val_error(self):
-        return compute_val_error_fast(self._val_errors, nb.typed.List(self._validation_set), 
+        return compute_val_error_fast(self._val_errors, 
+                                      nb.typed.List(self._validation_set), 
                                       self._epoch, self._user_features, 
-                                      self._item_features, self._user_biases, self._item_biases)
+                                      self._item_features, self._user_biases, 
+                                      self._item_biases)
 
 # Fast Numba Methods
 ################################################################################
@@ -733,8 +733,8 @@ def update_fast(i, user, item, values, user_features, item_features, user_biases
                 item_biases, learning_rate, lrate_C, do_items=True):
     # Pre-cache computations
     true = values[i] - 1
-    pred = predict_fast(user, item, user_features, 
-                        item_features, user_biases, item_biases)
+    pred = predict_fast(user, item, user_features, item_features, user_biases, 
+                        item_biases)
     a = np.exp( -( np.dot(user_features[user, :], item_features[item, :]) 
                   + user_biases[user, 0] + item_biases[item, 0] )
     )
@@ -772,8 +772,8 @@ def update_fast(i, user, item, values, user_features, item_features, user_biases
     return user_features, item_features, user_biases, item_biases
 
 @jit(nopython=True)
-def compute_error_fast(values, indices, indptr, num_samples, train_errors, 
-                       epoch, user_features, item_features, user_biases, item_biases):
+def compute_error_fast(values, indices, indptr, num_samples, train_errors, epoch, 
+                       user_features, item_features, user_biases, item_biases):
     loss = 0
 
     num_vals = 0
@@ -787,7 +787,8 @@ def compute_error_fast(values, indices, indptr, num_samples, train_errors,
             next_row_index += 1
 
         true = value - 1
-        pred = predict_fast(next_row_index - 1, column, user_features, item_features, user_biases, item_biases)
+        pred = predict_fast(next_row_index - 1, column, user_features, 
+                            item_features, user_biases, item_biases)
 
         loss += true*np.log(pred) + (1 - true)*np.log(1 - pred)
 
@@ -797,12 +798,12 @@ def compute_error_fast(values, indices, indptr, num_samples, train_errors,
     return loss
 
 @jit(nopython=True)
-def compute_val_error_fast(val_errors, validation_set,
-                       epoch, user_features, item_features, user_biases, item_biases):
+def compute_val_error_fast(val_errors, validation_set, epoch, user_features, 
+                           item_features, user_biases, item_biases):
    # Predict rating for all pairs in validation
-    predictions = predict_pairs_fast([(user, item) 
-                                for user, item, _ in validation_set], 
-                                user_features, item_features, user_biases, item_biases)
+    predictions = predict_pairs_fast([(user, item) for user, item, _ in 
+                                      validation_set], user_features, 
+                                      item_features, user_biases, item_biases)
     
     # Add true ratings into tuples
     predictions = [prediction + (validation_set[i][2],) 
@@ -827,9 +828,8 @@ def sigmoid_fast(x):
 
 @jit(nopython=True)
 def predict_fast(user, item, user_features, item_features, user_biases, item_biases):
-    sig = sigmoid_fast(
-            np.dot(user_features[user, :], item_features[item, :]) + user_biases[user, 0] + item_biases[item, 0]
-            )
+    sig = sigmoid_fast(np.dot(user_features[user, :], item_features[item, :]) 
+                       + user_biases[user, 0] + item_biases[item, 0])
     sig = np.minimum(sig, 0.9999)
     sig = np.maximum(sig, 0.00001)
     if np.isnan(sig):
@@ -849,7 +849,8 @@ def predict_pairs_fast(pairs, user_features, item_features, user_biases, item_bi
         """
         predictions = []
         for user, item in pairs:
-            prediction = predict_fast(user, item, user_features, item_features, user_biases, item_biases)
+            prediction = predict_fast(user, item, user_features, item_features, 
+                                      user_biases, item_biases)
             predictions.append((user, item, prediction))
         
         return predictions
