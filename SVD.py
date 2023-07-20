@@ -643,6 +643,15 @@ def compute_val_rmse_fast(val_errors, validation_set, epoch, mu, user_features,
 
 class LogisticSVD(SVDBase):
     def predict(self, user, item):
+        """ Predict the probability of user liking item.
+
+        Parameters:
+            user (int) - User index.
+            item (int) - Item index.
+
+        Returns:
+            prob (float) - Predicted probability of user liking item.
+        """
         return predict_fast(user, item, self._user_features, self._item_features, 
                             self._user_biases, self._item_biases)  
     
@@ -654,7 +663,8 @@ class LogisticSVD(SVDBase):
             n (int) - The number of recommendations to give
             
         Preconditions:
-            n > 0"""        
+            n > 0
+        """        
         top = []
         for item in range(self._num_items):
             # Do not add items for which rating already exists
@@ -669,7 +679,14 @@ class LogisticSVD(SVDBase):
         
         return top
 
-    def compute_recall(self, test, k=20):
+    def compute_recall(self, test, k=10):
+        """Compute the recall@k over all users top-n list on the given test set.
+        
+        Parameters:
+            test (List[Tuple[]]) - List of tuples of the form 
+                [(user, item, rating)].
+            k (int) - The length of top-n list to compute recall on.
+        """
         tops = {}
         hits = 0
         num_rel = 0
@@ -698,18 +715,20 @@ class LogisticSVD(SVDBase):
         print(recall)
 
     def _update(self, i, user, item):
+        """ Update and return model parameters with sample i.
+
+        Parameters:
+            i (int) - Index for sample i.
+            user (int) - Index for user.
+            item (int) - Index for item.
+
+        Returns:
+            parameters (Tuple[]) - Tuple of the form 
+                (user_features, item_features, user_biases, item_biases)
+        """
         return update_fast(i, user, item, self._M.data, self._user_features,
                            self._item_features, self._user_biases, 
                            self._item_biases, self._learning_rate, self._lrate_C)
-
-    def _cache_users_rated(self):
-        self._users_rated = {}
-        for sample_num in range(self._num_samples):
-            user = self._users[sample_num]
-            item = self._items[sample_num]
-            if user not in self._users_rated:
-                self._users_rated[user] = []
-            self._users_rated[user].append(item)
 
     def _compute_error(self):
         self._M = self._M.tocsr()
@@ -731,6 +750,30 @@ class LogisticSVD(SVDBase):
 @jit(nopython=True)
 def update_fast(i, user, item, values, user_features, item_features, user_biases, 
                 item_biases, learning_rate, lrate_C, do_items=True):
+    """ Update and return model parameters with sample i.
+
+    Parameters:
+        i (int) - Index for sample i.
+        user (int) - Index for user.
+        item (int) - Index for item.
+        values (numpy array) - Array of nonempty sparse matrix values.
+        user_features (numpy array) - Array of size NxK where N is the 
+            number of users and K is the number of latent factors.
+        item_features (numpy array) - Array of size MxK where M is the 
+            number of items and K is the number of latent factors.
+        user_biases (numpy array) - Array of size Nx1 where N is the 
+            number of users.
+        item_biases (numpy array) - Array of size Mx1 where M is the
+            number of items.
+        learning_rate (float) - Step size for update.
+        lrate_C (float) - Learning rate multiplied by regularisation constant
+            C.
+        do_items (bool) - True to update user features and biases.
+
+    Returns:
+        parameters (Tuple[]) - Tuple of the form 
+            (user_features, item_features, user_biases, item_biases)
+    """
     # Pre-cache computations
     true = values[i] - 1
     pred = predict_fast(user, item, user_features, item_features, user_biases, 
@@ -774,6 +817,29 @@ def update_fast(i, user, item, values, user_features, item_features, user_biases
 @jit(nopython=True)
 def compute_error_fast(values, indices, indptr, num_samples, train_errors, epoch, 
                        user_features, item_features, user_biases, item_biases):
+    """Compute and return binary cross-entropy loss on training set.
+
+    Parameters:
+        values (numpy array) - Array of nonempty sparse matrix values.
+        indices (numpy array) - Array of column index values.
+        indptr (numpy array) - Array of number of values in all rows before
+            row i, where i is used to index into the array.
+        num_samples (int) - The number of samples.
+        train_errors (numpy array) - Array of historical train errors.
+        epoch (int) - The total number of epochs.
+        mu (float) - Global mean rating.
+        user_features (numpy array) - Array of size NxK where N is the 
+            number of users and K is the number of latent factors.
+        item_features (numpy array) - Array of size MxK where M is the 
+            number of items and K is the number of latent factors.
+        user_biases (numpy array) - Array of size Nx1 where N is the 
+            number of users.
+        item_biases (numpy array) - Array of size Mx1 where M is the
+            number of items.
+        
+    Returns:
+        entropy (float) - The binary cross-entropy loss on the training set.
+    """
     loss = 0
 
     num_vals = 0
@@ -800,6 +866,26 @@ def compute_error_fast(values, indices, indptr, num_samples, train_errors, epoch
 @jit(nopython=True)
 def compute_val_error_fast(val_errors, validation_set, epoch, user_features, 
                            item_features, user_biases, item_biases):
+    """Compute and return binary cross-entropy loss on validation set.
+    
+    Parameters:
+        val_errors (numpy array) - Array of historical validation errors.
+        validation_set (List[Tuple[]]) - List of tuples of the form 
+                [(user, item, true_rating)].
+        epoch (int) - The total number of epochs.
+        mu (float) - Global mean rating.
+        user_features (numpy array) - Array of size NxK where N is the 
+            number of users and K is the number of latent factors.
+        item_features (numpy array) - Array of size MxK where M is the 
+            number of items and K is the number of latent factors.
+        user_biases (numpy array) - Array of size Nx1 where N is the 
+            number of users.
+        item_biases (numpy array) - Array of size Mx1 where M is the
+            number of items.
+
+    Returns:
+        entropy (float) - The root binary cross-entropy loss on the validation set.
+    """
    # Predict rating for all pairs in validation
     predictions = predict_pairs_fast([(user, item) for user, item, _ in 
                                       validation_set], user_features, 
@@ -821,13 +907,28 @@ def compute_val_error_fast(val_errors, validation_set, epoch, user_features,
 
 @jit(nopython=True)
 def sigmoid_fast(x):
-    # if x.shape == (1, 1) and np.isnan(x):
-    #     print("x is nan!!!!!!!!")
-    #     raise ValueError()
+    """Return the sigmoid of x."""
     return 1/(1 + np.exp(-x))
 
 @jit(nopython=True)
 def predict_fast(user, item, user_features, item_features, user_biases, item_biases):
+    """Predict the probability that user likes item.
+
+    Parameters:
+        user (int) - User index.
+        item (int) - Item index.
+        user_features (numpy array) - Array of size NxK where N is the 
+            number of users and K is the number of latent factors.
+        item_features (numpy array) - Array of size MxK where M is the 
+            number of items and K is the number of latent factors.
+        user_biases (numpy array) - Array of size Nx1 where N is the 
+            number of users.
+        item_biases (numpy array) - Array of size Mx1 where M is the
+            number of items.
+
+    Returns:
+        prob (float) - Probability that user likes item.
+    """
     sig = sigmoid_fast(np.dot(user_features[user, :], item_features[item, :]) 
                        + user_biases[user, 0] + item_biases[item, 0])
     sig = np.minimum(sig, 0.9999)
@@ -838,20 +939,28 @@ def predict_fast(user, item, user_features, item_features, user_biases, item_bia
 
 @jit(nopython=True)
 def predict_pairs_fast(pairs, user_features, item_features, user_biases, item_biases):
-        """Returns a list of predictions of the form (user, item, prediction) 
-        for each (user, item) pair in pairs.
+    """Returns a list of predictions of the form (user, item, prediction) 
+    for each (user, item) pair in pairs.
+    
+    Parameters:
+        pairs (List[]) - List of (user, item) tuples.
+        user_features (numpy array) - Array of size NxK where N is the 
+            number of users and K is the number of latent factors.
+        item_features (numpy array) - Array of size MxK where M is the 
+            number of items and K is the number of latent factors.
+        user_biases (numpy array) - Array of size Nx1 where N is the 
+            number of users.
+        item_biases (numpy array) - Array of size Mx1 where M is the
+            number of items.
         
-        Parameters:
-            pairs (list) - List of (user, item) tuples.
-            
-        Returns:
-            List of (user, item, prediction) tuples.
-        """
-        predictions = []
-        for user, item in pairs:
-            prediction = predict_fast(user, item, user_features, item_features, 
-                                      user_biases, item_biases)
-            predictions.append((user, item, prediction))
-        
-        return predictions
+    Returns:
+        List of (user, item, prediction) tuples.
+    """
+    predictions = []
+    for user, item in pairs:
+        prediction = predict_fast(user, item, user_features, item_features, 
+                                    user_biases, item_biases)
+        predictions.append((user, item, prediction))
+    
+    return predictions
 ################################################################################
