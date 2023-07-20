@@ -136,9 +136,11 @@ class SVDBase():
         self._mask = (self._M != 0)
         
         self._user_features = np.concatenate(
-            [self._user_features, np.random.normal(size=(1, self._k), scale=0.01)], axis=0)
+            [self._user_features, np.random.normal(size=(1, self._k), 
+                                                   scale=0.01)], axis=0)
                                                                                
-        indices_of_new = [new_i for new_i in range(self._num_users - 1, len(total_users))]
+        indices_of_new = [new_i for new_i in range(self._num_users - 1, 
+                                                   len(total_users))]
 
         self._cache_users_rated()
                                               
@@ -426,16 +428,44 @@ class RatingSVD(SVDBase):
 @jit(nopython=True)
 def predict_fast_rating(user, item, mu, user_features, item_features, 
                         user_biases, item_biases):
+    """Predict the rating for user on item.
+
+    Parameters:
+        user (int) - User index.
+        item (int) - Item index.
+        mu (float) - Global mean rating.
+        user_features (numpy array) - Array of size NxK where N is the 
+            number of users and K is the number of latent factors.
+        item_features (numpy array) - Array of size MxK where M is the 
+            number of items and K is the number of latent factors.
+        user_biases (numpy array) - Array of size Nx1 where N is the 
+            number of users.
+        item_biases (numpy array) - Array of size Mx1 where M is the
+            number of items.
+
+    Returns:
+        rating (float) - Predicted rating of user for item.
+    """
     return (np.dot(user_features[user, :], item_features[item, :]) 
             + user_biases[user, 0] + item_biases[item, 0] + mu)
 
 @jit(nopython=True)
-def predict_pairs_fast_rating(pairs, mu, user_features, item_features, user_biases, item_biases):
+def predict_pairs_fast_rating(pairs, mu, user_features, item_features, 
+                              user_biases, item_biases):
     """Returns a list of predictions of the form (user, item, prediction) 
     for each (user, item) pair in pairs.
     
     Parameters:
-        pairs (list) - List of (user, item) tuples.
+        pairs (List[]) - List of (user, item) tuples.
+        mu (float) - Global mean rating.
+        user_features (numpy array) - Array of size NxK where N is the 
+            number of users and K is the number of latent factors.
+        item_features (numpy array) - Array of size MxK where M is the 
+            number of items and K is the number of latent factors.
+        user_biases (numpy array) - Array of size Nx1 where N is the 
+            number of users.
+        item_biases (numpy array) - Array of size Mx1 where M is the
+            number of items.
         
     Returns:
         List of (user, item, prediction) tuples.
@@ -449,14 +479,46 @@ def predict_pairs_fast_rating(pairs, mu, user_features, item_features, user_bias
     return predictions
 
 @jit(nopython=True)
-def update_fast_rating(i, user, item, values, mu, user_features, item_features, user_biases, 
-                item_biases, user_penalty, item_penalty, learning_rate, lrate_C, do_items=True):
+def update_fast_rating(i, user, item, values, mu, user_features, item_features, 
+                       user_biases, item_biases, user_penalty, item_penalty, 
+                       learning_rate, lrate_C, do_items=True):
+    """ Update and return model parameters with sample i.
+
+    Parameters:
+        i (int) - Index for sample i.
+        user (int) - Index for user.
+        item (int) - Index for item.
+        values (numpy array) - Array of nonempty sparse matrix values.
+        mu (float) - Global mean rating.
+        user_features (numpy array) - Array of size NxK where N is the 
+            number of users and K is the number of latent factors.
+        item_features (numpy array) - Array of size MxK where M is the 
+            number of items and K is the number of latent factors.
+        user_biases (numpy array) - Array of size Nx1 where N is the 
+            number of users.
+        item_biases (numpy array) - Array of size Mx1 where M is the
+            number of items.
+        user_penalty (numpy array) - Array of size Nx1 where N is the number of 
+            users.
+        item_penalty (numpy array) - Array of size Mx1 where M is the number of 
+            items.
+        learning_rate (float) - Step size for update.
+        lrate_C (float) - Learning rate multiplied by regularisation constant
+            C.
+        do_items (bool) - True to update user features and biases.
+
+    Returns:
+        parameters (Tuple[]) - Tuple of the form 
+            (user_features, item_features, user_biases, item_biases)
+    """
     # Pre-cache computations
     true = values[i] - 1
     pred = predict_fast_rating(user, item, mu, user_features, 
                         item_features, user_biases, item_biases)
+    
     if np.isnan(user_penalty[user, 0]):
         raise ValueError(f"Nan for user {user}")
+    
     err = user_penalty[user, 0]*item_penalty[item, 0]*learning_rate*(true - pred)
     
     # Compute user features update
@@ -488,8 +550,31 @@ def update_fast_rating(i, user, item, values, mu, user_features, item_features, 
     return user_features, item_features, user_biases, item_biases
 
 @jit(nopython=True)
-def compute_rmse_fast(values, indices, indptr, num_samples, train_errors, 
-                       epoch, mu, user_features, item_features, user_biases, item_biases):
+def compute_rmse_fast(values, indices, indptr, num_samples, train_errors, epoch, 
+                      mu, user_features, item_features, user_biases, item_biases):
+    """Compute and return root mean squared error on training set.
+
+    Parameters:
+        values (numpy array) - Array of nonempty sparse matrix values.
+        indices (numpy array) - Array of column index values.
+        indptr (numpy array) - Array of number of values in all rows before
+            row i, where i is used to index into the array.
+        num_samples (int) - The number of samples.
+        train_errors (numpy array) - Array of historical train errors.
+        epoch (int) - The total number of epochs.
+        mu (float) - Global mean rating.
+        user_features (numpy array) - Array of size NxK where N is the 
+            number of users and K is the number of latent factors.
+        item_features (numpy array) - Array of size MxK where M is the 
+            number of items and K is the number of latent factors.
+        user_biases (numpy array) - Array of size Nx1 where N is the 
+            number of users.
+        item_biases (numpy array) - Array of size Mx1 where M is the
+            number of items.
+        
+    Returns:
+        rmse (float) - The root mean squared error on the training set.
+    """
     error = 0
 
     num_vals = 0
@@ -515,20 +600,39 @@ def compute_rmse_fast(values, indices, indptr, num_samples, train_errors,
     return error
 
 @jit(nopython=True)
-def compute_val_rmse_fast(val_errors, validation_set,
-                       epoch, mu, user_features, item_features, user_biases, item_biases):
+def compute_val_rmse_fast(val_errors, validation_set, epoch, mu, user_features, 
+                          item_features, user_biases, item_biases):
+    """Compute and return root mean squared error on validation set.
+    
+    Parameters:
+        val_errors (numpy array) - Array of historical validation errors.
+        validation_set (List[Tuple[]]) - List of tuples of the form 
+                [(user, item, true_rating)].
+        epoch (int) - The total number of epochs.
+        mu (float) - Global mean rating.
+        user_features (numpy array) - Array of size NxK where N is the 
+            number of users and K is the number of latent factors.
+        item_features (numpy array) - Array of size MxK where M is the 
+            number of items and K is the number of latent factors.
+        user_biases (numpy array) - Array of size Nx1 where N is the 
+            number of users.
+        item_biases (numpy array) - Array of size Mx1 where M is the
+            number of items.
+
+    Returns:
+        rmse (float) - The root mean squared error on the validation set.
+    """
    # Predict rating for all pairs in validation
-    predictions = predict_pairs_fast_rating([(user, item) 
-                                for user, item, _ in validation_set], 
-                                mu, user_features, item_features, user_biases, item_biases)
+    predictions = predict_pairs_fast_rating([(user, item) for user, item, _ in 
+                                             validation_set], mu, user_features, 
+                                             item_features, user_biases, item_biases)
     
     # Add true ratings into tuples
     predictions = [prediction + (validation_set[i][2],) 
                     for i, prediction in enumerate(predictions)]
     
     val_error = 0
-    for user, item, pred, true in predictions:
-        
+    for _, _, pred, true in predictions:
         val_error += (true - pred)**2
 
     val_error /= len(predictions)
@@ -619,7 +723,7 @@ class LogisticSVD(SVDBase):
                            self._user_features, self._item_features, self._user_biases, self._item_biases)
         
     def _compute_val_error(self):
-        return compute_val_error_fast(self._val_errors, List(self._validation_set), 
+        return compute_val_error_fast(self._val_errors, nb.typed.List(self._validation_set), 
                                       self._epoch, self._user_features, 
                                       self._item_features, self._user_biases, self._item_biases)
 
