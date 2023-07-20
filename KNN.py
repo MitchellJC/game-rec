@@ -19,7 +19,7 @@ def compute_sims(item_ratings, num_users, num_items, means=None):
                     sims[i, j] = -2
                     continue
                 means_prime =(means[i], means[j]) if means != None else (0, 0)
-                sims[i, j] = cos_sim(item_ratings[i], item_ratings[j], num_users, means_prime)
+                sims[i, j] = jac_sim(item_ratings[i], item_ratings[j], num_users, means_prime)
     
     return sims
 
@@ -43,6 +43,32 @@ def cos_sim(item_ratings_1, item_ratings_2, num_users, means):
 
     return sim
 
+@jit(nopython=True)
+def jac_sim(item_ratings_1, item_ratings_2, num_users, means):
+    a = 0
+    b = 0
+    c = 0
+    for user in item_ratings_1:
+        if user in item_ratings_1 and user in item_ratings_2:
+            r_1 = item_ratings_1[user] - 1
+            r_2 =  item_ratings_2[user] - 1
+            if r_1 == r_2:
+                a += 1
+            else:
+                b += 1
+
+        if user in item_ratings_1 or user in item_ratings_2:
+            c += 1
+
+    for user in item_ratings_2:
+        if user not in item_ratings_1:
+            c += 1
+
+
+    sim = (a - b)/c if c != 0 else -2
+
+    return sim
+
 def predict(sims, prefs, item, k):
     _, items = prefs.nonzero()
 
@@ -62,22 +88,22 @@ def predict(sims, prefs, item, k):
         r = prefs[0, j] - 1
         r = -1 if r == 0 else r
         a += sim*r
-        b += sim
+        b += 1
 
     pred = a/b if b != 0 else -2
-    pred = a
     return pred
 
-def top_n(n, sims, user_prefs, num_items, k, iufs=None):
+def top_n(n, sims, user_prefs, num_items, k, iufs=None, do_iufs=False):
     _, items = user_prefs.nonzero()
     top = []
     for i in range(num_items):
         pred = predict(sims, user_prefs, i, k)
-        if iufs and i in iufs:
+        if do_iufs and iufs and i in iufs:
             pred *= iufs[i]
         top.append((pred, i))
 
     top = [(pred, i) for pred, i in top if i not in items]
+    random.shuffle(top) # Keep large multi-way ties fresh
     top.sort(key=lambda x: x[0], reverse=True)
     top = top[:n]
 
@@ -106,6 +132,7 @@ class ItemKNN:
         self._mean_centered = mean_centered
         self._item_means = None
         self._iuf = iuf
+        self._iufs = None
 
     def fit(self, M):
         self._M = M
@@ -119,7 +146,7 @@ class ItemKNN:
     def top_n(self, user, n, prefs=None):
         prefs = self._M[[user], :] if prefs == None else prefs
         prefs = prefs.tocsr()
-        top = top_n(n, self._sims, prefs, self._num_items, self._k, iufs=self._iufs)
+        top = top_n(n, self._sims, prefs, self._num_items, self._k, iufs=self._iufs, do_iufs=self._iuf)
         return top
 
     def _store_rating_pairs(self, M):
