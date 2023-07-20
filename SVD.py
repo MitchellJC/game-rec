@@ -1,21 +1,27 @@
-from scipy.sparse.linalg import norm as sparse_norm
-from scipy.sparse import vstack, lil_array, csr_array
-from collections import defaultdict
 import time
 import random
 import math
+
 import numpy as np
-from queue import SimpleQueue
+from scipy.sparse import vstack, lil_array, csr_array
 from sklearn.metrics.pairwise import cosine_similarity
 
 import numba as nb
-from numba import jit, njit, float64, uint32
-from numba.typed import List, Dict
+from numba import jit
 
-from RecData import RecData
 
 class Metrics:
+    """Class containing functions for computing recommender metrics."""
     def rmse(self, predictions):
+        """Return the root mean squared error of the given predictions.
+        
+        Parameters:
+            predictions (List[Tuple[]]) - List of tuples of the form 
+                [(user, item, pred, true)].
+            
+        Returns:
+            The rmse of predictions (float).
+        """
         return math.sqrt(sum((prediction - true_rating)**2 for _, _, prediction, 
                              true_rating in predictions)/len(predictions))
 
@@ -32,7 +38,8 @@ class SVDBase():
             k (int) - The number of latent factors
             learning_rate (float) - The learning rate
             C (float) - Regularization parameter
-            partial"""
+            partial
+        """
         self._num_users = num_users
         self._num_items = num_items
         self._num_ratings = num_ratings
@@ -59,6 +66,19 @@ class SVDBase():
         self._epoch = -1
 
     def fit(self, M, epochs, validation_set=None, tol=1e-15, early_stop=True):
+        """Train the svd on utility matrix M.
+        
+        Parameters:
+            M (scipy sparse matrix) - An NxM utility matrix containing user ratings.
+                N is the number of users and M is the number of items.
+            epochs (int) - Number of epochs to train model.
+            validation_set (List[Tuple[]]) - List of tuples of the form 
+                [(user, item, true_rating)].
+            tol (float) - The tolerance for early stopping. If early stopping is 
+                enabled, stops training when validation error has improved by
+                less than tol.
+            early_stop (bool) - True to enable early stopping.
+        """
         self._M = M 
         self._M = self._M.tocsr()
         self._mu = self._M.sum() / len(self._M.nonzero()[0]) - 1
@@ -80,7 +100,12 @@ class SVDBase():
         self._run_epochs(self._users, self._items, epochs, early_stop=early_stop)
 
     def continue_fit(self, epochs, early_stop=True):
-        """Continue training for extra epochs"""      
+        """Continue training for extra epochs
+        
+        Parameters:
+            epochs (int) - Number of epochs to train model.
+            early_stop (bool) - True to enable early stopping.
+        """      
         new_train_errors = np.zeros([self._train_errors.shape[0] + epochs])
         new_val_errors = np.zeros([self._train_errors.shape[0] + epochs])   
 
@@ -99,7 +124,8 @@ class SVDBase():
             new_sample (csr_array) - 1xI arrary where I is the number of items
             epochs (int) - The number of epochs
             batch_size (int) - The number of users to mix-in for training
-            compute_err (bool) - True to enable training error computation"""
+            compute_err (bool) - True to enable training error computation
+        """
         print("Warning in development.")
         self._num_users += 1
         self._M = csr_array(vstack([lil_array(self._M), new_sample]))
@@ -119,7 +145,7 @@ class SVDBase():
         for epoch in range(epochs):
             start_time = time.time()
             # Choose a smaller subset of total samples already fitted
-            # fitted_subset = random.sample(range(self._num_samples), k=batch_size)    
+            fitted_subset = random.sample(range(self._num_samples), k=batch_size)    
             
             # Ensure that new indices are always used
             possible_indices =  indices_of_new # + fitted_subset
@@ -137,7 +163,7 @@ class SVDBase():
             print("Time:", round(time.time() - start_time, 2), "seconds")
 
     def pop_user(self):
-        """Remove the last added user from the model."""
+        """Remove the last added user from the model. Returns None."""
         self._num_users -= 1
         self._M = self._M[:-1, :]        
         self._user_features = self._user_features[:-1, :]
@@ -148,9 +174,16 @@ class SVDBase():
         Parameters:
             user (int) - The index of the user
             n (int) - The number of recommendations to give
+            remove_bias (bool) - True to not include items bias in prediction.
+                Can give more diverse recommendations.
             
         Preconditions:
-            n > 0"""        
+            n > 0
+            
+        Returns:
+            top (List[Tuple[]]) - List of tuples of the form 
+                [(predicted_rating, item_index)].
+        """        
         top = []
         for item in range(self._num_items):
             # Do not add items for which rating already exists
@@ -175,7 +208,8 @@ class SVDBase():
             pairs (list) - List of (user, item) tuples.
             
         Returns:
-            List of (user, item, prediction) tuples."""
+            List of (user, item, prediction) tuples.
+        """
         predictions = []
         for user, item in pairs:
             prediction = self.predict(user, item)
@@ -184,16 +218,19 @@ class SVDBase():
         return predictions
 
     def get_train_errors(self):
-        """Return the training errors stored while training. Returns none if 
-        model has not been fit."""
+        """Return the training errors stored while training. Returns None if 
+        model has not been fit.
+        """
         return self._train_errors
     
     def get_val_errors(self):
-        """Return the validation errors stored while training. Returns none if 
-        model has not been fit."""
+        """Return the validation errors stored while training. Returns None if 
+        model has not been fit.
+        """
         return self._val_errors
     
     def prep_for_item_knn(self):
+        """Clear memory of objects not needed for item knn."""
         del self._user_features
         del self._user_biases
         del self._item_biases
@@ -201,6 +238,7 @@ class SVDBase():
         del self._mask
 
     def compute_sims(self):
+        """Compute and cache similarity matrix for item knn."""
         start_t = time.time()
         q = self._item_features
         self._sims = lil_array((q.shape[0], q.shape[0]))
@@ -212,47 +250,17 @@ class SVDBase():
                 self._sims[i, j] = cosine_similarity(q[[i], :], q[[j], :])
         print("Done computing similarities in", time.time() - start_t, "seconds")
 
-    # def items_knn(self, subjects, n=10):
-    #     alpha = 1
-    #     top = []
-    #     seen = [i for i, _ in subjects]
-    #     disliked = [(i, pref) for i, pref in subjects if pref == 0]
-    #     # Get candidates
-    #     for i, pref in subjects:
-    #         if pref == 0:
-    #             continue
-            
-    #         for j in range(self._sims.shape[0]):
-    #             if i == j or j in seen:
-    #                 continue
-    #             elif j < i:
-    #                 sim = self._sims[j, i]
-    #             elif j > i:
-    #                 sim = self._sims[i, j]
-
-    #             # Get min dissimilarity
-    #             dissims = [0]
-    #             for k, pref in disliked:
-    #                 if j == k:
-    #                     continue
-    #                 elif j < k:
-    #                     dissim = 1 - self._sims[j, k]*alpha
-    #                 elif j > k:
-    #                     dissim = 1 - self._sims[k, j]*alpha
-
-    #                 dissims.append(dissim)
-
-    #             sim -= min(dissims)
-
-    #             seen.append(j)
-    #             top.append((sim, j))
-    #             top.sort(reverse=True)
-    #             top = top[:10*n]
-            
-    #     top = top[:n]
-
-    #     return top
     def items_knn(self, subjects, n=10):
+        """Return top n list using item knn method.
+        
+        Parameters:
+            subjects (List[Tuple[]]) - List of tuples of the form 
+                [(item_index, rating)].
+                
+        Returns:
+            top (List[Tuple[]]) - List of tuples of the form 
+                [(prediction, item_index)]
+        """
         k = 10
         for i in range(self._num_items):
             # Get neighbours
@@ -279,13 +287,14 @@ class SVDBase():
             pred = a/b if b != 0 else -2
             top.append((pred, i))
 
-        top = [(pred, i) for pred, i in top if i not in [j for j, pref in subjects]]
+        top = [(pred, i) for pred, i in top if i not in [j for j, _ in subjects]]
         top.sort(key=lambda x: x[0], reverse=True)
         top = top[:n]
 
         return top
 
     def _cache_users_rated(self):
+        """Cache the ratings of all users into a dictionary."""
         self._users_rated = {}
         for sample_num in range(self._num_samples):
             user = self._users[sample_num]
@@ -295,6 +304,14 @@ class SVDBase():
             self._users_rated[user].append(item)
 
     def _run_epochs(self, users, items, epochs, early_stop=False):
+        """Run training epochs.
+        
+        Parameters:
+            users (List[float]) - List of nonzero user indices.
+            items (List[float]) - List of nonzero item indices.
+            epochs (int) - Number of epochs to train for.
+            early_stop (bool) - True to enable early stopping.
+        """
         self._M = csr_array(self._M)
         for epoch in range(epochs):
             self._epoch += 1
@@ -328,6 +345,7 @@ class SVDBase():
                     return
             
     def _cache_user_item_weights(self):
+        """Cache weights for users and items depending on their popularity."""
         user_freqs = np.zeros([self._num_users, 1])
         item_freqs = np.zeros([self._num_items, 1])
         users, items = self._M.nonzero()
@@ -348,57 +366,87 @@ class SVDBase():
 class RatingSVD(SVDBase):
     """SVD for collaborative filtering, uses explicit ratings."""
     def predict(self, user, item):
+        """ Predict the rating for user on item.
+
+        Parameters:
+            user (int) - User index.
+            item (int) - Item index.
+
+        Returns:
+            rating (float) - Predicted rating of user for item.
+        """
         return predict_fast_rating(user, item, self._mu, self._user_features, 
                                   self._item_features, self._user_biases, 
                                   self._item_biases)
     
     def _update(self, i, user, item):
-        return update_fast_rating(i, user, item, self._M.data, 
-                                self._mu,
-                                self._user_features,
-                                self._item_features,
-                                self._user_biases,
-                                self._item_biases,
-                                self._user_penalty,
-                                self._item_penalty,
-                                self._learning_rate,
-                                self._lrate_C)
+        """ Update and return model parameters with sample i.
+
+        Parameters:
+            i (int) - Index for sample i.
+            user (int) - Index for user.
+            item (int) - Index for item.
+
+        Returns:
+            parameters (Tuple[]) - Tuple of the form 
+                (user_features, item_features, user_biases, item_biases)
+        """
+        return update_fast_rating(i, user, item, self._M.data, self._mu, 
+                                  self._user_features, self._item_features,
+                                  self._user_biases, self._item_biases, 
+                                  self._user_penalty, self._item_penalty,
+                                  self._learning_rate, self._lrate_C)
     
     def _compute_error(self):
+        """Compute and return root mean squared error on training set.
+        
+        Returns:
+            rmse (float) - The root mean squared error on the training set.
+        """
         self._M = self._M.tocsr()
         return compute_rmse_fast(self._M.data, self._M.indices, self._M.indptr, 
-                           self._num_samples, self._train_errors, self._epoch, self._mu,
-                           self._user_features, self._item_features, self._user_biases, self._item_biases)
+                                 self._num_samples, self._train_errors, self._epoch, 
+                                 self._mu, self._user_features, self._item_features, 
+                                 self._user_biases, self._item_biases)
         
     def _compute_val_error(self):
-        return compute_val_rmse_fast(self._val_errors, List(self._validation_set), 
-                                      self._epoch, self._mu, self._user_features, 
-                                      self._item_features, self._user_biases, self._item_biases)
+        """Compute and return root mean squared error on validation set.
+        
+        Returns:
+            rmse (float) - The root mean squared error on the validation set.
+        """
+        return compute_val_rmse_fast(self._val_errors, 
+                                     nb.typed.List(self._validation_set), 
+                                     self._epoch, self._mu, self._user_features, 
+                                     self._item_features, self._user_biases, 
+                                     self._item_biases)
     
 # Fast Numba Methods
 ################################################################################
 @jit(nopython=True)
-def predict_fast_rating(user, item, mu, user_features, item_features, user_biases, item_biases):
+def predict_fast_rating(user, item, mu, user_features, item_features, 
+                        user_biases, item_biases):
     return (np.dot(user_features[user, :], item_features[item, :]) 
             + user_biases[user, 0] + item_biases[item, 0] + mu)
 
 @jit(nopython=True)
 def predict_pairs_fast_rating(pairs, mu, user_features, item_features, user_biases, item_biases):
-        """Returns a list of predictions of the form (user, item, prediction) 
-        for each (user, item) pair in pairs.
+    """Returns a list of predictions of the form (user, item, prediction) 
+    for each (user, item) pair in pairs.
+    
+    Parameters:
+        pairs (list) - List of (user, item) tuples.
         
-        Parameters:
-            pairs (list) - List of (user, item) tuples.
-            
-        Returns:
-            List of (user, item, prediction) tuples."""
-        predictions = []
-        for user, item in pairs:
-            prediction = predict_fast_rating(user, item, mu, user_features, 
-                                            item_features, user_biases, item_biases)
-            predictions.append((user, item, prediction))
-        
-        return predictions
+    Returns:
+        List of (user, item, prediction) tuples.
+    """
+    predictions = []
+    for user, item in pairs:
+        prediction = predict_fast_rating(user, item, mu, user_features, 
+                                        item_features, user_biases, item_biases)
+        predictions.append((user, item, prediction))
+    
+    return predictions
 
 @jit(nopython=True)
 def update_fast_rating(i, user, item, values, mu, user_features, item_features, user_biases, 
@@ -409,7 +457,7 @@ def update_fast_rating(i, user, item, values, mu, user_features, item_features, 
                         item_features, user_biases, item_biases)
     if np.isnan(user_penalty[user, 0]):
         raise ValueError(f"Nan for user {user}")
-    err = user_penalty[user, 0]*item_penalty[item, 0]*learning_rate*(true - pred) # TODO Figure out what to do with item penalty.
+    err = user_penalty[user, 0]*item_penalty[item, 0]*learning_rate*(true - pred)
     
     # Compute user features update
     new_user_features = (
@@ -694,7 +742,8 @@ def predict_pairs_fast(pairs, user_features, item_features, user_biases, item_bi
             pairs (list) - List of (user, item) tuples.
             
         Returns:
-            List of (user, item, prediction) tuples."""
+            List of (user, item, prediction) tuples.
+        """
         predictions = []
         for user, item in pairs:
             prediction = predict_fast(user, item, user_features, item_features, user_biases, item_biases)
