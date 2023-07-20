@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 import random
-import multiprocessing as mp
 from scipy.sparse import csr_array, lil_array
 
 class RecData:
@@ -44,8 +43,10 @@ class RecData:
             self._M[user_index, item_index] = rating
         print("Done utility matrix.")
 
-        self._index_to_userid = {i: user_id for user_id, i in self._userid_to_index.items()}
-        self._index_to_itemid = {i: app_id for app_id, i in self._itemid_to_index.items()}
+        self._index_to_userid = {i: user_id for user_id, i in 
+                                 self._userid_to_index.items()}
+        self._index_to_itemid = {i: app_id for app_id, i in 
+                                 self._itemid_to_index.items()}
         
         self._users = [user for user in self._userid_to_index.keys()]
         self._items = [item for item in self._itemid_to_index.keys()]

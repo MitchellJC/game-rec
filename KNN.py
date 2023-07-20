@@ -1,4 +1,3 @@
-from scipy.sparse import csr_array, lil_array
 import numba as nb
 from numba import jit
 import numpy as np
@@ -19,7 +18,8 @@ def compute_sims(item_ratings, num_users, num_items, means=None):
                     sims[i, j] = -2
                     continue
                 means_prime =(means[i], means[j]) if means != None else (0, 0)
-                sims[i, j] = jac_sim(item_ratings[i], item_ratings[j], num_users, means_prime)
+                sims[i, j] = jac_sim(item_ratings[i], item_ratings[j], num_users, 
+                                     means_prime)
     
     return sims
 
@@ -141,12 +141,14 @@ class ItemKNN:
         if self._mean_centered:
             self._store_item_means(self._M)
         
-        self._sims = compute_sims(self._item_ratings, self._num_users, self._num_items, means=self._item_means)
+        self._sims = compute_sims(self._item_ratings, self._num_users, 
+                                  self._num_items, means=self._item_means)
 
     def top_n(self, user, n, prefs=None):
         prefs = self._M[[user], :] if prefs == None else prefs
         prefs = prefs.tocsr()
-        top = top_n(n, self._sims, prefs, self._num_items, self._k, iufs=self._iufs, do_iufs=self._iuf)
+        top = top_n(n, self._sims, prefs, self._num_items, self._k, 
+                    iufs=self._iufs, do_iufs=self._iuf)
         return top
 
     def _store_rating_pairs(self, M):
@@ -186,8 +188,10 @@ class ItemKNN:
         index_type = nb.types.int64
         rating_type = nb.types.float64
 
-        self._item_means = nb.typed.Dict.empty(key_type=index_type, value_type=rating_type)
-        self._iufs = nb.typed.Dict.empty(key_type=index_type, value_type=rating_type)
+        self._item_means = nb.typed.Dict.empty(key_type=index_type, 
+                                               value_type=rating_type)
+        self._iufs = nb.typed.Dict.empty(key_type=index_type, 
+                                         value_type=rating_type)
 
         for i in range(self._num_items):
             if i % 100 == 0:
@@ -195,10 +199,10 @@ class ItemKNN:
 
             if i in self._item_ratings:
                 ratings = self._item_ratings[i].values()
-                # ratings = users.values()
                 mean = sum(ratings)/len(self._item_ratings[i])
 
-                self._iufs[i] = np.emath.logn(4, self._num_users/(len(self._item_ratings[i])))
+                self._iufs[i] = np.emath.logn(4, self._num_users/
+                                              (len(self._item_ratings[i])))
             else:
                 mean = 0
 
