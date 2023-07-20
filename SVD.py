@@ -38,7 +38,6 @@ class SVDBase():
             k (int) - The number of latent factors
             learning_rate (float) - The learning rate
             C (float) - Regularization parameter
-            partial
         """
         self._num_users = num_users
         self._num_items = num_items
