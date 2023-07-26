@@ -245,4 +245,10 @@ class RecData:
         return prefs_vec
     
     def prep_for_item_knn(self):
+        # Keep index to title
         del self._M
+        del self._users
+        del self._items
+        del self._index_to_userid
+        del self._userid_to_index 
+        del self._itemid_to_index 
