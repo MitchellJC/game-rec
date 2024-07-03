@@ -16,3 +16,10 @@ Main notebook used for exploring svd methods.
 
 ## metadata.ipynb
 Main notebook for exploring neighbourhood methods.
+
+## Related Repositories
+### game-rec-app
+Video game recommendation web-app built using the KNN model can be found [here](https://github.com/MitchellJC/game-rec-app).
+
+### Image Collection
+Image collection repository can be found [here](https://github.com/MitchellJC/game-rec-scrape).
